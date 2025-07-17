@@ -35,12 +35,21 @@ func TestReadSimple(t *testing.T) {
 		{[]byte("foo\r\nbar"), []byte("foo\nbar")},
 		{[]byte("foo\r\x00bar"), []byte("foo\rbar")},
 		{[]byte{'h', IAC, SB, Echo, IAC, SE, 'i'}, []byte("hi")},
+		{
+			func() (result []byte) {
+				for c := range byte(127) {
+					result = append(result, '\r', c)
+				}
+				return
+			}(),
+			[]byte("\r\n"),
+		},
 	}
 	for _, test := range tests {
 		tcp := &mockConn{}
 		tcp.rbuf.Write(test.val)
 		telnet := Wrap(tcp)
-		actual := make([]byte, 8)
+		actual := make([]byte, len(test.val))
 		n, err := telnet.Read(actual)
 		require.NoError(t, err)
 		require.Equal(t, test.expected, actual[:n])

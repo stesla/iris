@@ -60,7 +60,7 @@ func (c *conn) Read(b []byte) (n int, err error) {
 			case '\x00':
 				buf[0] = '\r'
 				fallthrough
-			default:
+			case '\n':
 				copy()
 			}
 			c.ds = decodeByte
