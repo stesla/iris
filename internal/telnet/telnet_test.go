@@ -56,6 +56,33 @@ func TestReadSimple(t *testing.T) {
 	}
 }
 
+func TestSplitInput(t *testing.T) {
+	var tests = []struct {
+		vals     [][]byte
+		expected []byte
+	}{
+		{[][]byte{{'h', IAC}, {NOP, 'i'}}, []byte("hi")},
+		{[][]byte{{'h', IAC}, {IAC, 'i'}}, []byte{'h', IAC, 'i'}},
+		{[][]byte{[]byte("foo\r"), []byte("\nbar")}, []byte("foo\nbar")},
+		{[][]byte{[]byte("foo\r"), []byte("\x00bar")}, []byte("foo\rbar")},
+		{[][]byte{{'h', IAC, SB}, {Echo, IAC}, {SE, 'i'}}, []byte("hi")},
+	}
+	const bufsize = 16
+	for _, test := range tests {
+		tcp := &mockConn{}
+		telnet := Wrap(tcp)
+		buf := make([]byte, bufsize)
+		n := 0
+		for _, val := range test.vals {
+			tcp.rbuf.Write(val)
+			nv, err := telnet.Read(buf[n:])
+			require.NoError(t, err)
+			n += nv
+		}
+		require.Equal(t, test.expected, buf[:n])
+	}
+}
+
 func TestWriteSimple(t *testing.T) {
 	var tests = []struct {
 		val, expected []byte
