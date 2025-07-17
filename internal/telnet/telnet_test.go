@@ -2,6 +2,7 @@ package telnet
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"net"
 	"testing"
@@ -22,7 +23,15 @@ func (m *mockConn) SetDeadline(t time.Time) error      { return nil }
 func (m *mockConn) SetReadDeadline(t time.Time) error  { return nil }
 func (m *mockConn) SetWriteDeadline(t time.Time) error { return nil }
 
-// TODO: test Read contract parameters
+const bufsize = 16
+
+func TestReadIntoEmptySlice(t *testing.T) {
+	telnet := Wrap(nil)
+	buf := []byte{}
+	n, err := telnet.Read(buf)
+	require.Equal(t, 0, n)
+	require.NoError(t, err)
+}
 
 func TestRead(t *testing.T) {
 	var tests = []struct {
@@ -45,7 +54,6 @@ func TestRead(t *testing.T) {
 			[]byte("\r\n"),
 		},
 	}
-	const bufsize = 16
 	for _, test := range tests {
 		tcp := &mockConn{}
 		telnet := Wrap(tcp)
@@ -59,6 +67,41 @@ func TestRead(t *testing.T) {
 		}
 		require.Equal(t, test.expected, buf[:n])
 	}
+}
+
+type boomReader struct {
+	n   int
+	err error
+}
+
+func (r boomReader) Read(b []byte) (n int, err error) {
+	for i := 0; i < r.n && i < len(b); i++ {
+		b[i] = 'A' + byte(i)
+	}
+	return r.n, r.err
+}
+
+func TestReadWithUnderlyingError(t *testing.T) {
+	tcp := &mockConn{Reader: boomReader{3, errors.New("boom")}}
+	telnet := Wrap(tcp)
+	buf := make([]byte, bufsize)
+	n, err := telnet.Read(buf)
+	require.Error(t, err, "boom")
+	require.Equal(t, 3, n)
+	require.Equal(t, "ABC", string(buf[:n]))
+}
+
+func TestEOFWaitsForNextRead(t *testing.T) {
+	tcp := &mockConn{Reader: boomReader{3, io.EOF}}
+	telnet := Wrap(tcp)
+	buf := make([]byte, bufsize)
+	n, err := telnet.Read(buf)
+	require.NoError(t, err)
+	require.Equal(t, 3, n)
+	require.Equal(t, "ABC", string(buf[:n]))
+	n, err = telnet.Read(buf[n:])
+	require.Equal(t, io.EOF, err)
+	require.Equal(t, 0, n)
 }
 
 func TestWrite(t *testing.T) {

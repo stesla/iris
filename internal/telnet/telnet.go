@@ -1,6 +1,7 @@
 package telnet
 
 import (
+	"io"
 	"net"
 )
 
@@ -13,7 +14,8 @@ type Conn interface {
 type conn struct {
 	net.Conn
 
-	ds decodeState
+	ds  decodeState
+	eof bool
 }
 
 func Dial(address string) (Conn, error) {
@@ -35,6 +37,13 @@ const (
 )
 
 func (c *conn) Read(b []byte) (n int, err error) {
+	if c.eof {
+		return 0, io.EOF
+	}
+	if len(b) == 0 {
+		return 0, nil
+	}
+
 	buf := make([]byte, len(b))
 	nr, err := c.Conn.Read(buf)
 	buf = buf[:nr]
@@ -83,6 +92,10 @@ func (c *conn) Read(b []byte) (n int, err error) {
 			}
 		}
 		buf = buf[1:]
+	}
+	if err == io.EOF {
+		c.eof = true
+		err = nil
 	}
 	return
 }
