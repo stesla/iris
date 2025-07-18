@@ -36,20 +36,20 @@ const (
 	decodeSB
 )
 
-func (c *conn) Read(b []byte) (n int, err error) {
+func (c *conn) Read(p []byte) (n int, err error) {
 	if c.eof {
 		return 0, io.EOF
 	}
-	if len(b) == 0 {
+	if len(p) == 0 {
 		return 0, nil
 	}
 
-	buf := make([]byte, len(b))
+	buf := make([]byte, len(p))
 	nr, err := c.Conn.Read(buf)
 	buf = buf[:nr]
 
 	copy := func() {
-		b[n] = buf[0]
+		p[n] = buf[0]
 		n++
 	}
 
@@ -100,9 +100,9 @@ func (c *conn) Read(b []byte) (n int, err error) {
 	return
 }
 
-func (c *conn) Write(b []byte) (n int, err error) {
-	buf := make([]byte, 0, 2*len(b))
-	for _, c := range b {
+func (c *conn) Write(p []byte) (n int, err error) {
+	buf := make([]byte, 0, 2*len(p))
+	for _, c := range p {
 		switch c {
 		case IAC:
 			buf = append(buf, IAC, IAC)
@@ -115,6 +115,10 @@ func (c *conn) Write(b []byte) (n int, err error) {
 		}
 		n++
 	}
-	_, err = c.Conn.Write(buf)
+	_, err = c.WriteRaw(buf)
 	return
+}
+
+func (c *conn) WriteRaw(p []byte) (int, error) {
+	return c.Conn.Write(p)
 }
