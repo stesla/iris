@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -121,5 +122,44 @@ func TestWrite(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, len(test.val), n)
 		require.Equal(t, test.expected, buf.Bytes())
+	}
+}
+
+type mockEventHandler struct {
+	fn EventListener
+}
+
+func (eh *mockEventHandler) AddEventListener(ev any, el EventListener) {}
+
+func (eh *mockEventHandler) HandleEvent(ev any) (err error) {
+	return eh.fn(ev)
+}
+
+func TestReadCommand(t *testing.T) {
+	var tests = []struct {
+		val, expected []byte
+		event         any
+	}{
+		{[]byte{'a', IAC, GA, 'a'}, []byte("aa"), EventGA},
+		{[]byte{'b', IAC, DO, Echo, 'b'}, []byte("bb"), &eventNegotiation{DO, Echo}},
+		{[]byte{'c', IAC, DONT, Echo, 'c'}, []byte("cc"), &eventNegotiation{DONT, Echo}},
+		{[]byte{'d', IAC, WILL, Echo, 'd'}, []byte("dd"), &eventNegotiation{WILL, Echo}},
+		{[]byte{'e', IAC, WONT, Echo, 'e'}, []byte("ee"), &eventNegotiation{WONT, Echo}},
+		{[]byte{'f', IAC, SB, Echo, 'f', 'o', 'o', IAC, SE, 'f'}, []byte("ff"), &eventSubnegotiation{Echo, []byte("foo")}},
+		{[]byte{'g', IAC, SB, Echo, IAC, IAC, IAC, SE, 'g'}, []byte("gg"), &eventSubnegotiation{Echo, []byte{IAC}}},
+	}
+	for _, test := range tests {
+		var event any
+		tcp := &mockConn{Reader: bytes.NewReader(test.val)}
+		telnet := wrap(tcp)
+		telnet.EventHandler = &mockEventHandler{func(ev any) error {
+			event = ev
+			return nil
+		}}
+		buf := make([]byte, bufsize)
+		n, err := telnet.Read(buf)
+		require.NoError(t, err)
+		assert.Equal(t, test.expected, buf[:n])
+		assert.Equal(t, test.event, event)
 	}
 }
