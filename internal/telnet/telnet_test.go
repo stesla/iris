@@ -125,16 +125,6 @@ func TestWrite(t *testing.T) {
 	}
 }
 
-type mockEventHandler struct {
-	fn EventListener
-}
-
-func (eh *mockEventHandler) AddEventListener(ev any, el EventListener) {}
-
-func (eh *mockEventHandler) HandleEvent(ev any) (err error) {
-	return eh.fn(ev)
-}
-
 func TestReadCommand(t *testing.T) {
 	var tests = []struct {
 		val, expected []byte
@@ -150,12 +140,15 @@ func TestReadCommand(t *testing.T) {
 	}
 	for _, test := range tests {
 		var event any
-		tcp := &mockConn{Reader: bytes.NewReader(test.val)}
-		telnet := wrap(tcp)
-		telnet.EventHandler = &mockEventHandler{func(ev any) error {
+		captureEvent := func(ev any) error {
 			event = ev
 			return nil
-		}}
+		}
+		tcp := &mockConn{Reader: bytes.NewReader(test.val)}
+		telnet := wrap(tcp)
+		telnet.AddEventListener(EventGA, captureEvent)
+		telnet.AddEventListener(&eventNegotiation{}, captureEvent)
+		telnet.AddEventListener(&eventSubnegotiation{}, captureEvent)
 		buf := make([]byte, bufsize)
 		n, err := telnet.Read(buf)
 		require.NoError(t, err)
