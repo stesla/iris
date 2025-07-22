@@ -59,3 +59,7 @@ type eventSubnegotiation struct {
 	opt  byte
 	data []byte
 }
+
+type eventSend struct {
+	data []byte
+}
