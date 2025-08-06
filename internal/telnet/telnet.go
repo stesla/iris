@@ -169,6 +169,7 @@ func (c *conn) WriteRaw(p []byte) (int, error) {
 
 const eventEOF event.Name = "internal.end-of-file"
 const eventGA event.Name = "internal.go-ahead"
+const eventSend event.Name = "internal.send-data"
 
 const eventNegotation event.Name = "internal.option.negotiation"
 
@@ -181,11 +182,5 @@ const eventSubnegotiation event.Name = "internal.option.subnegotiation"
 
 type subnegotiation struct {
 	opt  byte
-	data []byte
-}
-
-const eventSend event.Name = "internal.send-data"
-
-type send struct {
 	data []byte
 }

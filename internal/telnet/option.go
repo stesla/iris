@@ -145,5 +145,5 @@ func (o *optionState) receive(eh event.Handler, b byte) {
 }
 
 func (o *optionState) sendCmd(b byte) any {
-	return &send{[]byte{IAC, b, o.opt}}
+	return []byte{IAC, b, o.opt}
 }
