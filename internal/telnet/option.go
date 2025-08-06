@@ -1,10 +1,12 @@
 package telnet
 
+import "github.com/stesla/iris/internal/event"
+
 type OptionState interface {
-	DisableForThem(eh EventHandler)
-	DisableForUs(eh EventHandler)
-	EnableForThem(eh EventHandler)
-	EnableForUs(eh EventHandler)
+	DisableForThem(eh event.Handler)
+	DisableForUs(eh event.Handler)
+	EnableForThem(eh event.Handler)
+	EnableForUs(eh event.Handler)
 	EnabledForThem() bool
 	EnabledForUs() bool
 }
@@ -28,32 +30,32 @@ type optionState struct {
 	us        qState
 }
 
-func (o *optionState) DisableForThem(eh EventHandler) {
+func (o *optionState) DisableForThem(eh event.Handler) {
 	o.disable(eh, &o.them, DONT)
 }
 
-func (o *optionState) DisableForUs(eh EventHandler) {
+func (o *optionState) DisableForUs(eh event.Handler) {
 	o.disable(eh, &o.us, WONT)
 }
 
-func (o *optionState) EnableForThem(eh EventHandler) {
+func (o *optionState) EnableForThem(eh event.Handler) {
 	o.enable(eh, &o.them, DO)
 }
 
-func (o *optionState) EnableForUs(eh EventHandler) {
+func (o *optionState) EnableForUs(eh event.Handler) {
 	o.enable(eh, &o.us, WILL)
 }
 
 func (o *optionState) EnabledForThem() bool { return o.them == qYes }
 func (o *optionState) EnabledForUs() bool   { return o.us == qYes }
 
-func (o *optionState) disable(eh EventHandler, state *qState, b byte) {
+func (o *optionState) disable(eh event.Handler, state *qState, b byte) {
 	switch *state {
 	case qNo:
 		// ignore
 	case qYes:
 		*state = qWantNoEmpty
-		eh.HandleEvent(o.sendCmd(b))
+		eh.HandleEvent(eventSend, o.sendCmd(b))
 	case qWantNoEmpty:
 		// ignore
 	case qWantNoOpposite:
@@ -65,11 +67,11 @@ func (o *optionState) disable(eh EventHandler, state *qState, b byte) {
 	}
 }
 
-func (o *optionState) enable(eh EventHandler, state *qState, b byte) {
+func (o *optionState) enable(eh event.Handler, state *qState, b byte) {
 	switch *state {
 	case qNo:
 		*state = qWantYesEmpty
-		eh.HandleEvent(o.sendCmd(b))
+		eh.HandleEvent(eventSend, o.sendCmd(b))
 	case qYes:
 		// ignore
 	case qWantNoEmpty:
@@ -83,7 +85,7 @@ func (o *optionState) enable(eh EventHandler, state *qState, b byte) {
 	}
 }
 
-func (o *optionState) receive(eh EventHandler, b byte) {
+func (o *optionState) receive(eh event.Handler, b byte) {
 	var allow *bool
 	var state *qState
 	var accept byte
@@ -106,9 +108,9 @@ func (o *optionState) receive(eh EventHandler, b byte) {
 		case qNo:
 			if *allow {
 				*state = qYes
-				eh.HandleEvent(o.sendCmd(accept))
+				eh.HandleEvent(eventSend, o.sendCmd(accept))
 			} else {
-				eh.HandleEvent(o.sendCmd(reject))
+				eh.HandleEvent(eventSend, o.sendCmd(reject))
 			}
 		case qYes:
 			// ignore
@@ -120,7 +122,7 @@ func (o *optionState) receive(eh EventHandler, b byte) {
 			*state = qYes
 		case qWantYesOpposite:
 			*state = qWantNoEmpty
-			eh.HandleEvent(o.sendCmd(reject))
+			eh.HandleEvent(eventSend, o.sendCmd(reject))
 		}
 	case DONT, WONT:
 		switch *state {
@@ -128,12 +130,12 @@ func (o *optionState) receive(eh EventHandler, b byte) {
 			// ignore
 		case qYes:
 			*state = qNo
-			eh.HandleEvent(o.sendCmd(reject))
+			eh.HandleEvent(eventSend, o.sendCmd(reject))
 		case qWantNoEmpty:
 			*state = qNo
 		case qWantNoOpposite:
 			*state = qWantYesEmpty
-			eh.HandleEvent(o.sendCmd(accept))
+			eh.HandleEvent(eventSend, o.sendCmd(accept))
 		case qWantYesEmpty:
 			*state = qNo
 		case qWantYesOpposite:
@@ -143,5 +145,5 @@ func (o *optionState) receive(eh EventHandler, b byte) {
 }
 
 func (o *optionState) sendCmd(b byte) any {
-	return &eventSend{[]byte{IAC, b, o.opt}}
+	return &send{[]byte{IAC, b, o.opt}}
 }

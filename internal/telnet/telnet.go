@@ -3,18 +3,20 @@ package telnet
 import (
 	"io"
 	"net"
+
+	"github.com/stesla/iris/internal/event"
 )
 
 const Foo = "foo"
 
 type Conn interface {
 	net.Conn
-	EventHandler
+	event.Handler
 }
 
 type conn struct {
 	net.Conn
-	EventHandler
+	event.Handler
 
 	cmd    byte
 	ds     decodeState
@@ -33,10 +35,10 @@ func Wrap(c net.Conn) Conn {
 
 func wrap(c net.Conn) *conn {
 	cc := &conn{
-		Conn:         c,
-		EventHandler: NewEventHandler(),
+		Conn:    c,
+		Handler: event.NewHandler(),
 	}
-	cc.AddEventListener(EventEOF, cc.handleEOF)
+	cc.AddEventListener(eventEOF, cc.handleEOF)
 	return cc
 }
 
@@ -99,7 +101,7 @@ func (c *conn) Read(p []byte) (n int, err error) {
 			case DO, DONT, WILL, WONT:
 				c.ds = decodeOptionNegotation
 			case GA:
-				c.HandleEvent(EventGA)
+				c.HandleEvent(eventGA, nil)
 				c.ds = decodeByte
 			case SB:
 				c.ds = decodeSB
@@ -111,7 +113,7 @@ func (c *conn) Read(p []byte) (n int, err error) {
 				c.ds = decodeByte
 			}
 		case decodeOptionNegotation:
-			c.HandleEvent(&eventNegotiation{c.cmd, buf[0]})
+			c.HandleEvent(eventNegotation, &negotiation{c.cmd, buf[0]})
 			c.ds = decodeByte
 		case decodeSB:
 			switch buf[0] {
@@ -126,7 +128,7 @@ func (c *conn) Read(p []byte) (n int, err error) {
 				c.sbdata = append(c.sbdata, IAC)
 				c.ds = decodeSB
 			case SE:
-				c.HandleEvent(&eventSubnegotiation{
+				c.HandleEvent(eventSubnegotiation, &subnegotiation{
 					opt:  c.sbdata[0],
 					data: c.sbdata[1:],
 				})
@@ -136,7 +138,7 @@ func (c *conn) Read(p []byte) (n int, err error) {
 		buf = buf[1:]
 	}
 	if err == io.EOF {
-		c.HandleEvent(EventEOF)
+		c.HandleEvent(eventEOF, nil)
 		err = nil
 	}
 	return
@@ -163,4 +165,27 @@ func (c *conn) Write(p []byte) (n int, err error) {
 
 func (c *conn) WriteRaw(p []byte) (int, error) {
 	return c.Conn.Write(p)
+}
+
+const eventEOF event.Name = "internal.end-of-file"
+const eventGA event.Name = "internal.go-ahead"
+
+const eventNegotation event.Name = "internal.option.negotiation"
+
+type negotiation struct {
+	cmd byte
+	opt byte
+}
+
+const eventSubnegotiation event.Name = "internal.option.subnegotiation"
+
+type subnegotiation struct {
+	opt  byte
+	data []byte
+}
+
+const eventSend event.Name = "internal.send-data"
+
+type send struct {
+	data []byte
 }

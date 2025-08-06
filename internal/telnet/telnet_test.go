@@ -130,13 +130,13 @@ func TestReadCommand(t *testing.T) {
 		val, expected []byte
 		event         any
 	}{
-		{[]byte{'a', IAC, GA, 'a'}, []byte("aa"), EventGA},
-		{[]byte{'b', IAC, DO, Echo, 'b'}, []byte("bb"), &eventNegotiation{DO, Echo}},
-		{[]byte{'c', IAC, DONT, Echo, 'c'}, []byte("cc"), &eventNegotiation{DONT, Echo}},
-		{[]byte{'d', IAC, WILL, Echo, 'd'}, []byte("dd"), &eventNegotiation{WILL, Echo}},
-		{[]byte{'e', IAC, WONT, Echo, 'e'}, []byte("ee"), &eventNegotiation{WONT, Echo}},
-		{[]byte{'f', IAC, SB, Echo, 'f', 'o', 'o', IAC, SE, 'f'}, []byte("ff"), &eventSubnegotiation{Echo, []byte("foo")}},
-		{[]byte{'g', IAC, SB, Echo, IAC, IAC, IAC, SE, 'g'}, []byte("gg"), &eventSubnegotiation{Echo, []byte{IAC}}},
+		{[]byte{'a', IAC, GA, 'a'}, []byte("aa"), "go ahead"},
+		{[]byte{'b', IAC, DO, Echo, 'b'}, []byte("bb"), &negotiation{DO, Echo}},
+		{[]byte{'c', IAC, DONT, Echo, 'c'}, []byte("cc"), &negotiation{DONT, Echo}},
+		{[]byte{'d', IAC, WILL, Echo, 'd'}, []byte("dd"), &negotiation{WILL, Echo}},
+		{[]byte{'e', IAC, WONT, Echo, 'e'}, []byte("ee"), &negotiation{WONT, Echo}},
+		{[]byte{'f', IAC, SB, Echo, 'f', 'o', 'o', IAC, SE, 'f'}, []byte("ff"), &subnegotiation{Echo, []byte("foo")}},
+		{[]byte{'g', IAC, SB, Echo, IAC, IAC, IAC, SE, 'g'}, []byte("gg"), &subnegotiation{Echo, []byte{IAC}}},
 	}
 	for _, test := range tests {
 		var event any
@@ -146,9 +146,12 @@ func TestReadCommand(t *testing.T) {
 		}
 		tcp := &mockConn{Reader: bytes.NewReader(test.val)}
 		telnet := wrap(tcp)
-		telnet.AddEventListener(EventGA, captureEvent)
-		telnet.AddEventListener(&eventNegotiation{}, captureEvent)
-		telnet.AddEventListener(&eventSubnegotiation{}, captureEvent)
+		telnet.AddEventListener(eventGA, func(any) error {
+			event = "go ahead"
+			return nil
+		})
+		telnet.AddEventListener(eventNegotation, captureEvent)
+		telnet.AddEventListener(eventSubnegotiation, captureEvent)
 		buf := make([]byte, bufsize)
 		n, err := telnet.Read(buf)
 		require.NoError(t, err)
