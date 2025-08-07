@@ -22,6 +22,8 @@ type conn struct {
 	ds     decodeState
 	eof    bool
 	sbdata []byte
+
+	options *OptionMap
 }
 
 func Dial(address string) (Conn, error) {
@@ -34,11 +36,16 @@ func Wrap(c net.Conn) Conn {
 }
 
 func wrap(c net.Conn) *conn {
+	eh := event.NewHandler()
+	options := NewOptionMap(eh)
 	cc := &conn{
 		Conn:    c,
-		Handler: event.NewHandler(),
+		Handler: eh,
+		options: options,
 	}
 	cc.AddEventListener(eventEOF, cc.handleEOF)
+	cc.AddEventListener(eventNegotation, options.handleNegotiation)
+	cc.AddEventListener(eventSend, cc.handleSend)
 	return cc
 }
 
@@ -56,6 +63,11 @@ const (
 func (c *conn) handleEOF(any) error {
 	c.eof = true
 	return nil
+}
+
+func (c *conn) handleSend(data any) error {
+	_, err := c.WriteRaw(data.([]byte))
+	return err
 }
 
 func (c *conn) Read(p []byte) (n int, err error) {

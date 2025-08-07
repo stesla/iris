@@ -159,3 +159,28 @@ func TestOptionEnabled(t *testing.T) {
 		require.Equal(t, test.expected, actual, i)
 	}
 }
+
+func TestOptionMapHandleNegotiation(t *testing.T) {
+	var actual []byte
+	eh := event.NewHandler()
+	eh.AddEventListener(eventSend, func(data any) error {
+		actual = data.([]byte)
+		return nil
+	})
+	m := NewOptionMap(eh)
+	m.Get(Echo).Allow(true, true)
+	var tests = []struct {
+		data     negotiation
+		expected []byte
+	}{
+		{negotiation{DO, Echo}, []byte{IAC, WILL, Echo}},
+		{negotiation{WILL, Echo}, []byte{IAC, DO, Echo}},
+		{negotiation{DO, SuppressGoAhead}, []byte{IAC, WONT, SuppressGoAhead}},
+		{negotiation{WILL, SuppressGoAhead}, []byte{IAC, DONT, SuppressGoAhead}},
+	}
+	for _, test := range tests {
+		actual = nil
+		m.handleNegotiation(&test.data)
+		require.Equal(t, test.expected, actual)
+	}
+}

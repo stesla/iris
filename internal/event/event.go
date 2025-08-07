@@ -31,8 +31,8 @@ func (eh *eventHandler) AddEventListener(event Name, l Listener) {
 }
 
 func (eh *eventHandler) HandleEvent(event Name, data any) (err error) {
-	eh.Lock()
-	defer eh.Unlock()
+	eh.RLock()
+	defer eh.RUnlock()
 	for _, h := range eh.handlers[event] {
 		if err = h(data); err != nil {
 			return

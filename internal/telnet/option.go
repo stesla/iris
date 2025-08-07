@@ -1,14 +1,49 @@
 package telnet
 
-import "github.com/stesla/iris/internal/event"
+import (
+	"math"
+
+	"github.com/stesla/iris/internal/event"
+)
 
 type OptionState interface {
+	Allow(them, us bool)
+	AllowThem(bool)
+	AllowUs(bool)
 	DisableForThem(eh event.Handler)
 	DisableForUs(eh event.Handler)
 	EnableForThem(eh event.Handler)
 	EnableForUs(eh event.Handler)
 	EnabledForThem() bool
 	EnabledForUs() bool
+	Option() byte
+}
+
+type OptionMap struct {
+	eh event.Handler
+	m  map[byte]*optionState
+}
+
+func NewOptionMap(eh event.Handler) (result *OptionMap) {
+	result = &OptionMap{
+		eh: eh,
+		m:  make(map[byte]*optionState, math.MaxUint8),
+	}
+	for opt := range byte(math.MaxUint8) {
+		result.m[opt] = &optionState{opt: opt}
+	}
+	return
+}
+
+func (m *OptionMap) Get(opt byte) OptionState {
+	return m.m[opt]
+}
+
+func (m *OptionMap) handleNegotiation(data any) error {
+	negotiation := data.(*negotiation)
+	opt := m.m[negotiation.opt]
+	opt.receive(m.eh, negotiation.cmd)
+	return nil
 }
 
 type qState int
@@ -30,6 +65,19 @@ type optionState struct {
 	us        qState
 }
 
+func (o *optionState) Allow(them, us bool) {
+	o.AllowThem(them)
+	o.AllowUs(us)
+}
+
+func (o *optionState) AllowThem(allow bool) {
+	o.allowThem = allow
+}
+
+func (o *optionState) AllowUs(allow bool) {
+	o.allowUs = allow
+}
+
 func (o *optionState) DisableForThem(eh event.Handler) {
 	o.disable(eh, &o.them, DONT)
 }
@@ -48,6 +96,8 @@ func (o *optionState) EnableForUs(eh event.Handler) {
 
 func (o *optionState) EnabledForThem() bool { return o.them == qYes }
 func (o *optionState) EnabledForUs() bool   { return o.us == qYes }
+
+func (o *optionState) Option() byte { return o.opt }
 
 func (o *optionState) disable(eh event.Handler, state *qState, b byte) {
 	switch *state {

@@ -144,7 +144,7 @@ func TestReadCommand(t *testing.T) {
 			event = ev
 			return nil
 		}
-		tcp := &mockConn{Reader: bytes.NewReader(test.val)}
+		tcp := &mockConn{Reader: bytes.NewReader(test.val), Writer: io.Discard}
 		telnet := wrap(tcp)
 		telnet.AddEventListener(eventGA, func(any) error {
 			event = "go ahead"
