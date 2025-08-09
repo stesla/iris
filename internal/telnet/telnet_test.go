@@ -121,7 +121,7 @@ func TestWrite(t *testing.T) {
 		n, err := telnet.Write(test.val)
 		require.NoError(t, err)
 		require.Equal(t, len(test.val), n)
-		require.Equal(t, test.expected, buf.Bytes())
+		require.Equal(t, append(test.expected, IAC, GA), buf.Bytes())
 	}
 }
 
@@ -158,4 +158,14 @@ func TestReadCommand(t *testing.T) {
 		assert.Equal(t, test.expected, buf[:n])
 		assert.Equal(t, test.event, event)
 	}
+}
+
+func TestSuppressGoAhead(t *testing.T) {
+	var output bytes.Buffer
+	tcp := &mockConn{Writer: &output}
+	telnet := wrap(tcp)
+	telnet.options.m[SuppressGoAhead] = &optionState{opt: SuppressGoAhead, us: qYes}
+	_, err := telnet.Write([]byte("xyzzy"))
+	require.NoError(t, err)
+	require.Equal(t, []byte("xyzzy"), output.Bytes())
 }

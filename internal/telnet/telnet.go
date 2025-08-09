@@ -70,6 +70,10 @@ func (c *conn) handleSend(data any) error {
 	return err
 }
 
+func (c *conn) shouldSendGoAhead() bool {
+	return !c.options.Get(SuppressGoAhead).EnabledForUs()
+}
+
 func (c *conn) Read(p []byte) (n int, err error) {
 	if c.eof {
 		return 0, io.EOF
@@ -170,6 +174,9 @@ func (c *conn) Write(p []byte) (n int, err error) {
 			buf = append(buf, c)
 		}
 		n++
+	}
+	if c.shouldSendGoAhead() {
+		buf = append(buf, IAC, GA)
 	}
 	_, err = c.WriteRaw(buf)
 	return
