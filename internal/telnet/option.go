@@ -19,6 +19,14 @@ type OptionState interface {
 	Option() byte
 }
 
+const EventOption event.Name = "telnet.event.option"
+
+type OptionData struct {
+	OptionState
+	ChangedThem bool
+	ChangedUs   bool
+}
+
 type OptionMap struct {
 	eh event.Handler
 	m  map[byte]*optionState
@@ -136,6 +144,7 @@ func (o *optionState) enable(eh event.Handler, state *qState, b byte) {
 }
 
 func (o *optionState) receive(eh event.Handler, b byte) {
+	var themBefore, usBefore = o.them, o.us
 	var allow *bool
 	var state *qState
 	var accept byte
@@ -192,6 +201,14 @@ func (o *optionState) receive(eh event.Handler, b byte) {
 			*state = qNo
 		}
 	}
+	if changedThem, changedUs := themBefore != o.them, usBefore != o.us; changedThem || changedUs {
+		eh.HandleEvent(EventOption, OptionData{
+			OptionState: o,
+			ChangedThem: changedThem,
+			ChangedUs:   changedUs,
+		})
+	}
+
 }
 
 func (o *optionState) sendCmd(b byte) any {

@@ -184,3 +184,32 @@ func TestOptionMapHandleNegotiation(t *testing.T) {
 		require.Equal(t, test.expected, actual)
 	}
 }
+
+func TestOptionEvent(t *testing.T) {
+	var actual OptionData
+	eh := event.NewHandler()
+	eh.AddEventListener(EventOption, func(data any) error {
+		actual = data.(OptionData)
+		return nil
+	})
+	var tests = []struct {
+		state    optionState
+		cmd      byte
+		expected OptionData
+	}{
+		{optionState{allowThem: true, them: qNo}, WILL, OptionData{&optionState{allowThem: true, them: qYes}, true, false}},
+		{optionState{allowThem: true, them: qWantNoOpposite}, WILL, OptionData{&optionState{allowThem: true, them: qYes}, true, false}},
+		{optionState{allowThem: true, them: qWantYesEmpty}, WILL, OptionData{&optionState{allowThem: true, them: qYes}, true, false}},
+		{optionState{allowUs: true, us: qNo}, DO, OptionData{&optionState{allowUs: true, us: qYes}, false, true}},
+		{optionState{allowUs: true, us: qWantNoOpposite}, DO, OptionData{&optionState{allowUs: true, us: qYes}, false, true}},
+		{optionState{allowUs: true, us: qWantYesEmpty}, DO, OptionData{&optionState{allowUs: true, us: qYes}, false, true}},
+		{optionState{them: qYes}, WONT, OptionData{&optionState{them: qNo}, true, false}},
+		{optionState{us: qYes}, DONT, OptionData{&optionState{us: qNo}, false, true}},
+	}
+	for _, test := range tests {
+		actual = OptionData{}
+		state := test.state
+		state.receive(eh, test.cmd)
+		require.Equal(t, test.expected, actual)
+	}
+}
