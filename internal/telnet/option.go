@@ -27,13 +27,17 @@ type OptionData struct {
 	ChangedUs   bool
 }
 
-type OptionMap struct {
+type OptionMap interface {
+	Get(opt byte) OptionState
+}
+
+type optionMap struct {
 	d event.Dispatcher
 	m map[byte]*optionState
 }
 
-func NewOptionMap(d event.Dispatcher) (result *OptionMap) {
-	result = &OptionMap{
+func newOptionMap(d event.Dispatcher) (result *optionMap) {
+	result = &optionMap{
 		d: d,
 		m: make(map[byte]*optionState, math.MaxUint8),
 	}
@@ -43,11 +47,11 @@ func NewOptionMap(d event.Dispatcher) (result *OptionMap) {
 	return
 }
 
-func (m *OptionMap) Get(opt byte) OptionState {
+func (m *optionMap) Get(opt byte) OptionState {
 	return m.m[opt]
 }
 
-func (m *OptionMap) handleNegotiation(data any) error {
+func (m *optionMap) handleNegotiation(data any) error {
 	negotiation := data.(*negotiation)
 	opt := m.m[negotiation.opt]
 	opt.receive(m.d, negotiation.cmd)

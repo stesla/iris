@@ -18,8 +18,10 @@ type conn struct {
 	net.Conn
 	event.Dispatcher
 
-	r       io.Reader
-	options *OptionMap
+	r io.Reader
+	w io.Writer
+
+	options *optionMap
 }
 
 func Dial(address string) (Conn, error) {
@@ -33,12 +35,13 @@ func Wrap(c net.Conn) Conn {
 
 func wrap(c net.Conn) *conn {
 	dispatcher := event.NewDispatcher()
-	options := NewOptionMap(dispatcher)
+	options := newOptionMap(dispatcher)
 	cc := &conn{
 		Conn:       c,
 		Dispatcher: dispatcher,
 		options:    options,
 		r:          &reader{in: c, d: dispatcher},
+		w:          &writer{out: c, options: options},
 	}
 	cc.Listen(eventNegotation, options.handleNegotiation)
 	cc.Listen(eventSend, cc.handleSend)
@@ -61,15 +64,9 @@ func (c *conn) handleSend(data any) error {
 	return err
 }
 
-func (c *conn) shouldSendEndOfRecord() bool {
-	return c.options.Get(EndOfRecord).EnabledForUs()
-}
-
-func (c *conn) shouldSendGoAhead() bool {
-	return !c.options.Get(SuppressGoAhead).EnabledForUs()
-}
-
-func (c *conn) Read(p []byte) (n int, err error) { return c.r.Read(p) }
+func (c *conn) Read(p []byte) (n int, err error)  { return c.r.Read(p) }
+func (c *conn) Write(p []byte) (n int, err error) { return c.w.Write(p) }
+func (c *conn) WriteRaw(p []byte) (int, error)    { return c.Conn.Write(p) }
 
 type reader struct {
 	in io.Reader
@@ -170,7 +167,12 @@ func (r *reader) Read(p []byte) (n int, err error) {
 	return
 }
 
-func (c *conn) Write(p []byte) (n int, err error) {
+type writer struct {
+	out     io.Writer
+	options OptionMap
+}
+
+func (w *writer) Write(p []byte) (n int, err error) {
 	buf := make([]byte, 0, 2*len(p))
 	for _, c := range p {
 		switch c {
@@ -185,18 +187,22 @@ func (c *conn) Write(p []byte) (n int, err error) {
 		}
 		n++
 	}
-	if c.shouldSendEndOfRecord() {
+	if w.shouldSendEndOfRecord() {
 		buf = append(buf, IAC, EOR)
 	}
-	if c.shouldSendGoAhead() {
+	if w.shouldSendGoAhead() {
 		buf = append(buf, IAC, GA)
 	}
-	_, err = c.WriteRaw(buf)
+	_, err = w.out.Write(buf)
 	return
 }
 
-func (c *conn) WriteRaw(p []byte) (int, error) {
-	return c.Conn.Write(p)
+func (w *writer) shouldSendEndOfRecord() bool {
+	return w.options.Get(EndOfRecord).EnabledForUs()
+}
+
+func (w *writer) shouldSendGoAhead() bool {
+	return !w.options.Get(SuppressGoAhead).EnabledForUs()
 }
 
 const eventEndOfRecord event.Name = "internal.end-of-record"
