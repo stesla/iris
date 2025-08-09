@@ -43,7 +43,7 @@ func wrap(c net.Conn) *conn {
 		Dispatcher: eh,
 		options:    options,
 	}
-	cc.Listen(eventEOF, cc.handleEOF)
+	cc.Listen(eventEndOfFile, cc.handleEOF)
 	cc.Listen(eventNegotation, options.handleNegotiation)
 	cc.Listen(eventSend, cc.handleSend)
 	return cc
@@ -68,6 +68,10 @@ func (c *conn) handleEOF(any) error {
 func (c *conn) handleSend(data any) error {
 	_, err := c.WriteRaw(data.([]byte))
 	return err
+}
+
+func (c *conn) shouldSendEndOfRecord() bool {
+	return c.options.Get(EndOfRecord).EnabledForUs()
 }
 
 func (c *conn) shouldSendGoAhead() bool {
@@ -116,8 +120,11 @@ func (c *conn) Read(p []byte) (n int, err error) {
 			switch c.cmd {
 			case DO, DONT, WILL, WONT:
 				c.ds = decodeOptionNegotation
+			case EOR:
+				c.Dispatch(eventEndOfRecord, nil)
+				c.ds = decodeByte
 			case GA:
-				c.Dispatch(eventGA, nil)
+				c.Dispatch(eventGoAhead, nil)
 				c.ds = decodeByte
 			case SB:
 				c.ds = decodeSB
@@ -154,7 +161,7 @@ func (c *conn) Read(p []byte) (n int, err error) {
 		buf = buf[1:]
 	}
 	if err == io.EOF {
-		c.Dispatch(eventEOF, nil)
+		c.Dispatch(eventEndOfFile, nil)
 		err = nil
 	}
 	return
@@ -175,6 +182,9 @@ func (c *conn) Write(p []byte) (n int, err error) {
 		}
 		n++
 	}
+	if c.shouldSendEndOfRecord() {
+		buf = append(buf, IAC, EOR)
+	}
 	if c.shouldSendGoAhead() {
 		buf = append(buf, IAC, GA)
 	}
@@ -186,6 +196,7 @@ func (c *conn) WriteRaw(p []byte) (int, error) {
 	return c.Conn.Write(p)
 }
 
-const eventEOF event.Name = "internal.end-of-file"
-const eventGA event.Name = "internal.go-ahead"
+const eventEndOfFile event.Name = "internal.end-of-file"
+const eventEndOfRecord event.Name = "internal.end-of-record"
+const eventGoAhead event.Name = "internal.go-ahead"
 const eventSend event.Name = "internal.send-data"

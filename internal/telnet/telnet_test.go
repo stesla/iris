@@ -131,6 +131,7 @@ func TestReadCommand(t *testing.T) {
 		event         any
 	}{
 		{[]byte{'a', IAC, GA, 'a'}, []byte("aa"), "go ahead"},
+		{[]byte{'a', IAC, EOR, 'a'}, []byte("aa"), "end of record"},
 		{[]byte{'b', IAC, DO, Echo, 'b'}, []byte("bb"), &negotiation{DO, Echo}},
 		{[]byte{'c', IAC, DONT, Echo, 'c'}, []byte("cc"), &negotiation{DONT, Echo}},
 		{[]byte{'d', IAC, WILL, Echo, 'd'}, []byte("dd"), &negotiation{WILL, Echo}},
@@ -146,7 +147,11 @@ func TestReadCommand(t *testing.T) {
 		}
 		tcp := &mockConn{Reader: bytes.NewReader(test.val), Writer: io.Discard}
 		telnet := wrap(tcp)
-		telnet.Listen(eventGA, func(any) error {
+		telnet.Listen(eventEndOfRecord, func(any) error {
+			event = "end of record"
+			return nil
+		})
+		telnet.Listen(eventGoAhead, func(any) error {
 			event = "go ahead"
 			return nil
 		})
@@ -168,4 +173,15 @@ func TestSuppressGoAhead(t *testing.T) {
 	_, err := telnet.Write([]byte("xyzzy"))
 	require.NoError(t, err)
 	require.Equal(t, []byte("xyzzy"), output.Bytes())
+}
+
+func TestEndOfRecord(t *testing.T) {
+	var output bytes.Buffer
+	tcp := &mockConn{Writer: &output}
+	telnet := wrap(tcp)
+	telnet.options.m[EndOfRecord] = &optionState{opt: EndOfRecord, us: qYes}
+	telnet.options.m[SuppressGoAhead] = &optionState{opt: SuppressGoAhead, us: qYes}
+	_, err := telnet.Write([]byte("foo"))
+	require.NoError(t, err)
+	require.Equal(t, []byte{'f', 'o', 'o', IAC, EOR}, output.Bytes())
 }
