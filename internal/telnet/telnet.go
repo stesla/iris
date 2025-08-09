@@ -11,12 +11,12 @@ const Foo = "foo"
 
 type Conn interface {
 	net.Conn
-	event.Handler
+	event.Dispatcher
 }
 
 type conn struct {
 	net.Conn
-	event.Handler
+	event.Dispatcher
 
 	cmd    byte
 	ds     decodeState
@@ -36,16 +36,16 @@ func Wrap(c net.Conn) Conn {
 }
 
 func wrap(c net.Conn) *conn {
-	eh := event.NewHandler()
+	eh := event.NewDispatcher()
 	options := NewOptionMap(eh)
 	cc := &conn{
-		Conn:    c,
-		Handler: eh,
-		options: options,
+		Conn:       c,
+		Dispatcher: eh,
+		options:    options,
 	}
-	cc.AddEventListener(eventEOF, cc.handleEOF)
-	cc.AddEventListener(eventNegotation, options.handleNegotiation)
-	cc.AddEventListener(eventSend, cc.handleSend)
+	cc.Listen(eventEOF, cc.handleEOF)
+	cc.Listen(eventNegotation, options.handleNegotiation)
+	cc.Listen(eventSend, cc.handleSend)
 	return cc
 }
 
@@ -113,7 +113,7 @@ func (c *conn) Read(p []byte) (n int, err error) {
 			case DO, DONT, WILL, WONT:
 				c.ds = decodeOptionNegotation
 			case GA:
-				c.HandleEvent(eventGA, nil)
+				c.Dispatch(eventGA, nil)
 				c.ds = decodeByte
 			case SB:
 				c.ds = decodeSB
@@ -125,7 +125,7 @@ func (c *conn) Read(p []byte) (n int, err error) {
 				c.ds = decodeByte
 			}
 		case decodeOptionNegotation:
-			c.HandleEvent(eventNegotation, &negotiation{c.cmd, buf[0]})
+			c.Dispatch(eventNegotation, &negotiation{c.cmd, buf[0]})
 			c.ds = decodeByte
 		case decodeSB:
 			switch buf[0] {
@@ -140,7 +140,7 @@ func (c *conn) Read(p []byte) (n int, err error) {
 				c.sbdata = append(c.sbdata, IAC)
 				c.ds = decodeSB
 			case SE:
-				c.HandleEvent(eventSubnegotiation, &subnegotiation{
+				c.Dispatch(eventSubnegotiation, &subnegotiation{
 					opt:  c.sbdata[0],
 					data: c.sbdata[1:],
 				})
@@ -150,7 +150,7 @@ func (c *conn) Read(p []byte) (n int, err error) {
 		buf = buf[1:]
 	}
 	if err == io.EOF {
-		c.HandleEvent(eventEOF, nil)
+		c.Dispatch(eventEOF, nil)
 		err = nil
 	}
 	return

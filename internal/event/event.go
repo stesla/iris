@@ -8,32 +8,32 @@ type Name string
 
 type Listener func(any) error
 
-type Handler interface {
-	AddEventListener(event Name, l Listener)
-	HandleEvent(event Name, data any) error
+type Dispatcher interface {
+	Listen(event Name, l Listener)
+	Dispatch(event Name, data any) error
 }
 
-func NewHandler() Handler {
-	return &eventHandler{
+func NewDispatcher() Dispatcher {
+	return &dispatcher{
 		handlers: map[Name][]Listener{},
 	}
 }
 
-type eventHandler struct {
+type dispatcher struct {
 	handlers map[Name][]Listener
 	sync.RWMutex
 }
 
-func (eh *eventHandler) AddEventListener(event Name, l Listener) {
-	eh.Lock()
-	defer eh.Unlock()
-	eh.handlers[event] = append(eh.handlers[event], l)
+func (d *dispatcher) Listen(event Name, l Listener) {
+	d.Lock()
+	defer d.Unlock()
+	d.handlers[event] = append(d.handlers[event], l)
 }
 
-func (eh *eventHandler) HandleEvent(event Name, data any) (err error) {
-	eh.RLock()
-	defer eh.RUnlock()
-	for _, h := range eh.handlers[event] {
+func (d *dispatcher) Dispatch(event Name, data any) (err error) {
+	d.RLock()
+	defer d.RUnlock()
+	for _, h := range d.handlers[event] {
 		if err = h(data); err != nil {
 			return
 		}

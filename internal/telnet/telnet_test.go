@@ -146,12 +146,12 @@ func TestReadCommand(t *testing.T) {
 		}
 		tcp := &mockConn{Reader: bytes.NewReader(test.val), Writer: io.Discard}
 		telnet := wrap(tcp)
-		telnet.AddEventListener(eventGA, func(any) error {
+		telnet.Listen(eventGA, func(any) error {
 			event = "go ahead"
 			return nil
 		})
-		telnet.AddEventListener(eventNegotation, captureEvent)
-		telnet.AddEventListener(eventSubnegotiation, captureEvent)
+		telnet.Listen(eventNegotation, captureEvent)
+		telnet.Listen(eventSubnegotiation, captureEvent)
 		buf := make([]byte, bufsize)
 		n, err := telnet.Read(buf)
 		require.NoError(t, err)

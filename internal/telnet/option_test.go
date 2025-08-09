@@ -47,8 +47,8 @@ func TestOptionStateReceive(t *testing.T) {
 
 	for i, test := range tests {
 		var eventReceived any
-		eh := event.NewHandler()
-		eh.AddEventListener(eventSend, func(ev any) error {
+		d := event.NewDispatcher()
+		d.Listen(eventSend, func(ev any) error {
 			eventReceived = ev
 			return nil
 		})
@@ -56,7 +56,7 @@ func TestOptionStateReceive(t *testing.T) {
 		state.opt = Echo
 		expected := test.end
 		expected.opt = Echo
-		state.receive(eh, test.b)
+		state.receive(d, test.b)
 		require.Equal(t, expected, state, i)
 		if data, ok := test.ev.([]byte); ok {
 			data = append(data, Echo)
@@ -69,16 +69,16 @@ func TestOptionStateReceive(t *testing.T) {
 
 func TestOptionEnableOrDisable(t *testing.T) {
 	var eventReceived any
-	eh := event.NewHandler()
-	eh.AddEventListener(eventSend, func(ev any) error {
+	d := event.NewDispatcher()
+	d.Listen(eventSend, func(ev any) error {
 		eventReceived = ev
 		return nil
 	})
 
-	disableThem := func(os *optionState) { os.DisableForThem(eh) }
-	disableUs := func(os *optionState) { os.DisableForUs(eh) }
-	enableThem := func(os *optionState) { os.EnableForThem(eh) }
-	enableUs := func(os *optionState) { os.EnableForUs(eh) }
+	disableThem := func(os *optionState) { os.DisableForThem(d) }
+	disableUs := func(os *optionState) { os.DisableForUs(d) }
+	enableThem := func(os *optionState) { os.EnableForThem(d) }
+	enableUs := func(os *optionState) { os.EnableForUs(d) }
 	var tests = []struct {
 		fn    func(*optionState)
 		start optionState
@@ -162,12 +162,12 @@ func TestOptionEnabled(t *testing.T) {
 
 func TestOptionMapHandleNegotiation(t *testing.T) {
 	var actual []byte
-	eh := event.NewHandler()
-	eh.AddEventListener(eventSend, func(data any) error {
+	d := event.NewDispatcher()
+	d.Listen(eventSend, func(data any) error {
 		actual = data.([]byte)
 		return nil
 	})
-	m := NewOptionMap(eh)
+	m := NewOptionMap(d)
 	m.Get(Echo).Allow(true, true)
 	var tests = []struct {
 		data     negotiation
@@ -187,8 +187,8 @@ func TestOptionMapHandleNegotiation(t *testing.T) {
 
 func TestOptionEvent(t *testing.T) {
 	var actual OptionData
-	eh := event.NewHandler()
-	eh.AddEventListener(EventOption, func(data any) error {
+	d := event.NewDispatcher()
+	d.Listen(EventOption, func(data any) error {
 		actual = data.(OptionData)
 		return nil
 	})
@@ -209,7 +209,7 @@ func TestOptionEvent(t *testing.T) {
 	for _, test := range tests {
 		actual = OptionData{}
 		state := test.state
-		state.receive(eh, test.cmd)
+		state.receive(d, test.cmd)
 		require.Equal(t, test.expected, actual)
 	}
 }

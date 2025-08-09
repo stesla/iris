@@ -10,10 +10,10 @@ type OptionState interface {
 	Allow(them, us bool)
 	AllowThem(bool)
 	AllowUs(bool)
-	DisableForThem(eh event.Handler)
-	DisableForUs(eh event.Handler)
-	EnableForThem(eh event.Handler)
-	EnableForUs(eh event.Handler)
+	DisableForThem(d event.Dispatcher)
+	DisableForUs(d event.Dispatcher)
+	EnableForThem(d event.Dispatcher)
+	EnableForUs(d event.Dispatcher)
 	EnabledForThem() bool
 	EnabledForUs() bool
 	Option() byte
@@ -28,14 +28,14 @@ type OptionData struct {
 }
 
 type OptionMap struct {
-	eh event.Handler
-	m  map[byte]*optionState
+	d event.Dispatcher
+	m map[byte]*optionState
 }
 
-func NewOptionMap(eh event.Handler) (result *OptionMap) {
+func NewOptionMap(d event.Dispatcher) (result *OptionMap) {
 	result = &OptionMap{
-		eh: eh,
-		m:  make(map[byte]*optionState, math.MaxUint8),
+		d: d,
+		m: make(map[byte]*optionState, math.MaxUint8),
 	}
 	for opt := range byte(math.MaxUint8) {
 		result.m[opt] = &optionState{opt: opt}
@@ -50,7 +50,7 @@ func (m *OptionMap) Get(opt byte) OptionState {
 func (m *OptionMap) handleNegotiation(data any) error {
 	negotiation := data.(*negotiation)
 	opt := m.m[negotiation.opt]
-	opt.receive(m.eh, negotiation.cmd)
+	opt.receive(m.d, negotiation.cmd)
 	return nil
 }
 
@@ -86,20 +86,20 @@ func (o *optionState) AllowUs(allow bool) {
 	o.allowUs = allow
 }
 
-func (o *optionState) DisableForThem(eh event.Handler) {
-	o.disable(eh, &o.them, DONT)
+func (o *optionState) DisableForThem(d event.Dispatcher) {
+	o.disable(d, &o.them, DONT)
 }
 
-func (o *optionState) DisableForUs(eh event.Handler) {
-	o.disable(eh, &o.us, WONT)
+func (o *optionState) DisableForUs(d event.Dispatcher) {
+	o.disable(d, &o.us, WONT)
 }
 
-func (o *optionState) EnableForThem(eh event.Handler) {
-	o.enable(eh, &o.them, DO)
+func (o *optionState) EnableForThem(d event.Dispatcher) {
+	o.enable(d, &o.them, DO)
 }
 
-func (o *optionState) EnableForUs(eh event.Handler) {
-	o.enable(eh, &o.us, WILL)
+func (o *optionState) EnableForUs(d event.Dispatcher) {
+	o.enable(d, &o.us, WILL)
 }
 
 func (o *optionState) EnabledForThem() bool { return o.them == qYes }
@@ -107,13 +107,13 @@ func (o *optionState) EnabledForUs() bool   { return o.us == qYes }
 
 func (o *optionState) Option() byte { return o.opt }
 
-func (o *optionState) disable(eh event.Handler, state *qState, b byte) {
+func (o *optionState) disable(d event.Dispatcher, state *qState, b byte) {
 	switch *state {
 	case qNo:
 		// ignore
 	case qYes:
 		*state = qWantNoEmpty
-		eh.HandleEvent(eventSend, o.sendCmd(b))
+		d.Dispatch(eventSend, o.sendCmd(b))
 	case qWantNoEmpty:
 		// ignore
 	case qWantNoOpposite:
@@ -125,11 +125,11 @@ func (o *optionState) disable(eh event.Handler, state *qState, b byte) {
 	}
 }
 
-func (o *optionState) enable(eh event.Handler, state *qState, b byte) {
+func (o *optionState) enable(d event.Dispatcher, state *qState, b byte) {
 	switch *state {
 	case qNo:
 		*state = qWantYesEmpty
-		eh.HandleEvent(eventSend, o.sendCmd(b))
+		d.Dispatch(eventSend, o.sendCmd(b))
 	case qYes:
 		// ignore
 	case qWantNoEmpty:
@@ -143,7 +143,7 @@ func (o *optionState) enable(eh event.Handler, state *qState, b byte) {
 	}
 }
 
-func (o *optionState) receive(eh event.Handler, b byte) {
+func (o *optionState) receive(d event.Dispatcher, b byte) {
 	var themBefore, usBefore = o.them, o.us
 	var allow *bool
 	var state *qState
@@ -167,9 +167,9 @@ func (o *optionState) receive(eh event.Handler, b byte) {
 		case qNo:
 			if *allow {
 				*state = qYes
-				eh.HandleEvent(eventSend, o.sendCmd(accept))
+				d.Dispatch(eventSend, o.sendCmd(accept))
 			} else {
-				eh.HandleEvent(eventSend, o.sendCmd(reject))
+				d.Dispatch(eventSend, o.sendCmd(reject))
 			}
 		case qYes:
 			// ignore
@@ -181,7 +181,7 @@ func (o *optionState) receive(eh event.Handler, b byte) {
 			*state = qYes
 		case qWantYesOpposite:
 			*state = qWantNoEmpty
-			eh.HandleEvent(eventSend, o.sendCmd(reject))
+			d.Dispatch(eventSend, o.sendCmd(reject))
 		}
 	case DONT, WONT:
 		switch *state {
@@ -189,12 +189,12 @@ func (o *optionState) receive(eh event.Handler, b byte) {
 			// ignore
 		case qYes:
 			*state = qNo
-			eh.HandleEvent(eventSend, o.sendCmd(reject))
+			d.Dispatch(eventSend, o.sendCmd(reject))
 		case qWantNoEmpty:
 			*state = qNo
 		case qWantNoOpposite:
 			*state = qWantYesEmpty
-			eh.HandleEvent(eventSend, o.sendCmd(accept))
+			d.Dispatch(eventSend, o.sendCmd(accept))
 		case qWantYesEmpty:
 			*state = qNo
 		case qWantYesOpposite:
@@ -202,7 +202,7 @@ func (o *optionState) receive(eh event.Handler, b byte) {
 		}
 	}
 	if changedThem, changedUs := themBefore != o.them, usBefore != o.us; changedThem || changedUs {
-		eh.HandleEvent(EventOption, OptionData{
+		d.Dispatch(EventOption, OptionData{
 			OptionState: o,
 			ChangedThem: changedThem,
 			ChangedUs:   changedUs,

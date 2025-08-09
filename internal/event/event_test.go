@@ -10,12 +10,12 @@ const testEvent Name = "test.event"
 
 func TestEventDispatch(t *testing.T) {
 	var event any
-	bus := NewHandler()
-	bus.AddEventListener(testEvent, func(ev any) (err error) {
+	bus := NewDispatcher()
+	bus.Listen(testEvent, func(ev any) (err error) {
 		event = ev
 		return nil
 	})
-	err := bus.HandleEvent(testEvent, 42)
+	err := bus.Dispatch(testEvent, 42)
 	require.NoError(t, err)
 	require.Equal(t, 42, event)
 }
