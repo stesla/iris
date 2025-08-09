@@ -18,11 +18,7 @@ type conn struct {
 	net.Conn
 	event.Dispatcher
 
-	cmd    byte
-	ds     decodeState
-	eof    bool
-	sbdata []byte
-
+	r       io.Reader
 	options *OptionMap
 }
 
@@ -36,14 +32,14 @@ func Wrap(c net.Conn) Conn {
 }
 
 func wrap(c net.Conn) *conn {
-	eh := event.NewDispatcher()
-	options := NewOptionMap(eh)
+	dispatcher := event.NewDispatcher()
+	options := NewOptionMap(dispatcher)
 	cc := &conn{
 		Conn:       c,
-		Dispatcher: eh,
+		Dispatcher: dispatcher,
 		options:    options,
+		r:          &reader{in: c, d: dispatcher},
 	}
-	cc.Listen(eventEndOfFile, cc.handleEOF)
 	cc.Listen(eventNegotation, options.handleNegotiation)
 	cc.Listen(eventSend, cc.handleSend)
 	return cc
@@ -60,11 +56,6 @@ const (
 	decodeOptionNegotation
 )
 
-func (c *conn) handleEOF(any) error {
-	c.eof = true
-	return nil
-}
-
 func (c *conn) handleSend(data any) error {
 	_, err := c.WriteRaw(data.([]byte))
 	return err
@@ -78,8 +69,20 @@ func (c *conn) shouldSendGoAhead() bool {
 	return !c.options.Get(SuppressGoAhead).EnabledForUs()
 }
 
-func (c *conn) Read(p []byte) (n int, err error) {
-	if c.eof {
+func (c *conn) Read(p []byte) (n int, err error) { return c.r.Read(p) }
+
+type reader struct {
+	in io.Reader
+	d  event.Dispatcher
+
+	cmd    byte
+	ds     decodeState
+	eof    bool
+	sbdata []byte
+}
+
+func (r *reader) Read(p []byte) (n int, err error) {
+	if r.eof {
 		return 0, io.EOF
 	}
 	if len(p) == 0 {
@@ -87,7 +90,7 @@ func (c *conn) Read(p []byte) (n int, err error) {
 	}
 
 	buf := make([]byte, len(p))
-	nr, err := c.Conn.Read(buf)
+	nr, err := r.in.Read(buf)
 	buf = buf[:nr]
 
 	copy := func() {
@@ -96,13 +99,13 @@ func (c *conn) Read(p []byte) (n int, err error) {
 	}
 
 	for len(buf) > 0 {
-		switch c.ds {
+		switch r.ds {
 		case decodeByte:
 			switch buf[0] {
 			case IAC:
-				c.ds = decodeIAC
+				r.ds = decodeIAC
 			case '\r':
-				c.ds = decodeCR
+				r.ds = decodeCR
 			default:
 				copy()
 			}
@@ -114,54 +117,54 @@ func (c *conn) Read(p []byte) (n int, err error) {
 			case '\n':
 				copy()
 			}
-			c.ds = decodeByte
+			r.ds = decodeByte
 		case decodeIAC:
-			c.cmd = buf[0]
-			switch c.cmd {
+			r.cmd = buf[0]
+			switch r.cmd {
 			case DO, DONT, WILL, WONT:
-				c.ds = decodeOptionNegotation
+				r.ds = decodeOptionNegotation
 			case EOR:
-				c.Dispatch(eventEndOfRecord, nil)
-				c.ds = decodeByte
+				r.d.Dispatch(eventEndOfRecord, nil)
+				r.ds = decodeByte
 			case GA:
-				c.Dispatch(eventGoAhead, nil)
-				c.ds = decodeByte
+				r.d.Dispatch(eventGoAhead, nil)
+				r.ds = decodeByte
 			case SB:
-				c.ds = decodeSB
-				c.sbdata = nil
+				r.ds = decodeSB
+				r.sbdata = nil
 			case IAC:
 				copy()
-				c.ds = decodeByte
+				r.ds = decodeByte
 			default:
-				c.ds = decodeByte
+				r.ds = decodeByte
 			}
 		case decodeOptionNegotation:
-			c.Dispatch(eventNegotation, &negotiation{c.cmd, buf[0]})
-			c.ds = decodeByte
+			r.d.Dispatch(eventNegotation, &negotiation{r.cmd, buf[0]})
+			r.ds = decodeByte
 		case decodeSB:
 			switch buf[0] {
 			case IAC:
-				c.ds = decodeSBIAC
+				r.ds = decodeSBIAC
 			default:
-				c.sbdata = append(c.sbdata, buf[0])
+				r.sbdata = append(r.sbdata, buf[0])
 			}
 		case decodeSBIAC:
 			switch buf[0] {
 			case IAC:
-				c.sbdata = append(c.sbdata, IAC)
-				c.ds = decodeSB
+				r.sbdata = append(r.sbdata, IAC)
+				r.ds = decodeSB
 			case SE:
-				c.Dispatch(eventSubnegotiation, &subnegotiation{
-					opt:  c.sbdata[0],
-					data: c.sbdata[1:],
+				r.d.Dispatch(eventSubnegotiation, &subnegotiation{
+					opt:  r.sbdata[0],
+					data: r.sbdata[1:],
 				})
-				c.ds = decodeByte
+				r.ds = decodeByte
 			}
 		}
 		buf = buf[1:]
 	}
 	if err == io.EOF {
-		c.Dispatch(eventEndOfFile, nil)
+		r.eof = true
 		err = nil
 	}
 	return
@@ -196,7 +199,6 @@ func (c *conn) WriteRaw(p []byte) (int, error) {
 	return c.Conn.Write(p)
 }
 
-const eventEndOfFile event.Name = "internal.end-of-file"
 const eventEndOfRecord event.Name = "internal.end-of-record"
 const eventGoAhead event.Name = "internal.go-ahead"
 const eventSend event.Name = "internal.send-data"
