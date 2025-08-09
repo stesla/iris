@@ -214,3 +214,17 @@ func (o *optionState) receive(d event.Dispatcher, b byte) {
 func (o *optionState) sendCmd(b byte) any {
 	return []byte{IAC, b, o.opt}
 }
+
+const eventNegotation event.Name = "internal.option.negotiation"
+
+type negotiation struct {
+	cmd byte
+	opt byte
+}
+
+const eventSubnegotiation event.Name = "internal.option.subnegotiation"
+
+type subnegotiation struct {
+	opt  byte
+	data []byte
+}
