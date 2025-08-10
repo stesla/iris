@@ -7,8 +7,6 @@ import (
 	"github.com/stesla/iris/internal/event"
 )
 
-const Foo = "foo"
-
 type Conn interface {
 	net.Conn
 	event.Dispatcher
@@ -17,11 +15,10 @@ type Conn interface {
 type conn struct {
 	net.Conn
 	event.Dispatcher
+	OptionMap
 
 	r io.Reader
 	w io.Writer
-
-	options *optionMap
 }
 
 func Dial(address string) (Conn, error) {
@@ -35,15 +32,15 @@ func Wrap(c net.Conn) Conn {
 
 func wrap(c net.Conn) *conn {
 	dispatcher := event.NewDispatcher()
-	options := newOptionMap(dispatcher)
+	options := NewOptionMap(dispatcher)
 	cc := &conn{
 		Conn:       c,
 		Dispatcher: dispatcher,
-		options:    options,
+		OptionMap:  options,
 		r:          &reader{in: c, d: dispatcher},
 		w:          &writer{out: c, options: options},
 	}
-	cc.Listen(eventNegotation, options.handleNegotiation)
+	cc.Listen(eventNegotation, cc.handleNegotiation)
 	cc.Listen(eventSend, cc.handleSend)
 	return cc
 }
@@ -60,13 +57,12 @@ const (
 )
 
 func (c *conn) handleSend(data any) error {
-	_, err := c.WriteRaw(data.([]byte))
+	_, err := c.Conn.Write(data.([]byte))
 	return err
 }
 
 func (c *conn) Read(p []byte) (n int, err error)  { return c.r.Read(p) }
 func (c *conn) Write(p []byte) (n int, err error) { return c.w.Write(p) }
-func (c *conn) WriteRaw(p []byte) (int, error)    { return c.Conn.Write(p) }
 
 type reader struct {
 	in io.Reader

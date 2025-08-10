@@ -169,7 +169,7 @@ func TestSuppressGoAhead(t *testing.T) {
 	var output bytes.Buffer
 	tcp := &mockConn{Writer: &output}
 	telnet := wrap(tcp)
-	*telnet.options.m[SuppressGoAhead] = optionState{opt: SuppressGoAhead, us: qYes}
+	telnet.OptionMap.set(&optionState{opt: SuppressGoAhead, us: qYes})
 	_, err := telnet.Write([]byte("xyzzy"))
 	require.NoError(t, err)
 	require.Equal(t, []byte("xyzzy"), output.Bytes())
@@ -179,8 +179,8 @@ func TestEndOfRecord(t *testing.T) {
 	var output bytes.Buffer
 	tcp := &mockConn{Writer: &output}
 	telnet := wrap(tcp)
-	*telnet.options.m[EndOfRecord] = optionState{opt: EndOfRecord, us: qYes}
-	*telnet.options.m[SuppressGoAhead] = optionState{opt: SuppressGoAhead, us: qYes}
+	telnet.OptionMap.set(&optionState{opt: EndOfRecord, us: qYes})
+	telnet.OptionMap.set(&optionState{opt: SuppressGoAhead, us: qYes})
 	_, err := telnet.Write([]byte("foo"))
 	require.NoError(t, err)
 	require.Equal(t, []byte{'f', 'o', 'o', IAC, EOR}, output.Bytes())

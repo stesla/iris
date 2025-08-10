@@ -29,22 +29,25 @@ type OptionData struct {
 
 type OptionMap interface {
 	Get(opt byte) OptionState
+
+	handleNegotiation(data any) error
+	set(OptionState)
 }
 
-type optionMap struct {
-	d event.Dispatcher
-	m map[byte]*optionState
-}
-
-func newOptionMap(d event.Dispatcher) (result *optionMap) {
-	result = &optionMap{
+func NewOptionMap(d event.Dispatcher) OptionMap {
+	result := &optionMap{
 		d: d,
 		m: make(map[byte]*optionState, math.MaxUint8),
 	}
 	for opt := range byte(math.MaxUint8) {
 		result.m[opt] = &optionState{opt: opt}
 	}
-	return
+	return result
+}
+
+type optionMap struct {
+	d event.Dispatcher
+	m map[byte]*optionState
 }
 
 func (m *optionMap) Get(opt byte) OptionState {
@@ -56,6 +59,11 @@ func (m *optionMap) handleNegotiation(data any) error {
 	opt := m.m[negotiation.opt]
 	opt.receive(m.d, negotiation.cmd)
 	return nil
+}
+
+func (m *optionMap) set(opt OptionState) {
+	o := opt.(*optionState)
+	*m.m[o.opt] = *o
 }
 
 type qState int

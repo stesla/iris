@@ -167,7 +167,7 @@ func TestOptionMapHandleNegotiation(t *testing.T) {
 		actual = data.([]byte)
 		return nil
 	})
-	m := newOptionMap(d)
+	m := NewOptionMap(d)
 	m.Get(Echo).Allow(true, true)
 	var tests = []struct {
 		data     negotiation
