@@ -10,6 +10,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/text/encoding"
 )
 
 type mockConn struct {
@@ -27,11 +28,12 @@ func (m *mockConn) SetWriteDeadline(t time.Time) error { return nil }
 const bufsize = 16
 
 func TestReadIntoEmptySlice(t *testing.T) {
-	telnet := Wrap(nil)
+	var in bytes.Buffer
+	telnet := Wrap(&mockConn{Reader: &in})
 	buf := []byte{}
 	n, err := telnet.Read(buf)
 	require.Equal(t, 0, n)
-	require.NoError(t, err)
+	require.ErrorIs(t, err, io.EOF)
 }
 
 func TestRead(t *testing.T) {
@@ -40,17 +42,18 @@ func TestRead(t *testing.T) {
 		expected []byte
 	}{
 		{[][]byte{[]byte("foo")}, []byte("foo")},
-		{[][]byte{{'h', IAC}, {NOP, 'i'}}, []byte("hi")},
-		{[][]byte{{'h', IAC}, {IAC, 'i'}}, []byte{'h', IAC, 'i'}},
+		{[][]byte{{'h', IAC}, {NOP, 'a'}}, []byte("ha")},
+		{[][]byte{{'h', IAC}, {IAC, 'e'}}, []byte{'h', IAC, 'e'}},
 		{[][]byte{[]byte("foo\r"), []byte("\nbar")}, []byte("foo\nbar")},
 		{[][]byte{[]byte("foo\r"), []byte("\x00bar")}, []byte("foo\rbar")},
-		{[][]byte{{'h', IAC, SB}, {Echo, IAC}, {SE, 'i'}}, []byte("hi")},
+		{[][]byte{{'h', IAC, SB, Echo, IAC, SE, 'i'}}, []byte("hi")},
 		{
-			func() (result [][]byte) {
+			func() [][]byte {
+				var bytes []byte
 				for c := range byte(127) {
-					result = append(result, []byte{'\r', c})
+					bytes = append(bytes, '\r', c)
 				}
-				return
+				return [][]byte{bytes}
 			}(),
 			[]byte("\r\n"),
 		},
@@ -58,12 +61,13 @@ func TestRead(t *testing.T) {
 	for _, test := range tests {
 		tcp := &mockConn{}
 		telnet := Wrap(tcp)
+		telnet.SetEncoding(encoding.Nop)
 		buf := make([]byte, bufsize)
 		n := 0
 		for _, val := range test.vals {
 			tcp.Reader = bytes.NewReader(val)
 			nv, err := telnet.Read(buf[n:])
-			require.NoError(t, err)
+			require.NoError(t, err, test.expected)
 			n += nv
 		}
 		require.Equal(t, test.expected, buf[:n])
@@ -118,6 +122,7 @@ func TestWrite(t *testing.T) {
 		var buf bytes.Buffer
 		tcp := &mockConn{Writer: &buf}
 		telnet := Wrap(tcp)
+		telnet.SetEncoding(encoding.Nop)
 		n, err := telnet.Write(test.val)
 		require.NoError(t, err)
 		require.Equal(t, len(test.val), n)
@@ -184,4 +189,19 @@ func TestEndOfRecord(t *testing.T) {
 	_, err := telnet.Write([]byte("foo"))
 	require.NoError(t, err)
 	require.Equal(t, []byte{'f', 'o', 'o', IAC, EOR}, output.Bytes())
+}
+
+func TestDefaultEncodingASCII(t *testing.T) {
+	var output bytes.Buffer
+	tcp := &mockConn{Reader: bytes.NewBuffer([]byte{IAC, IAC, 128, 129}), Writer: &output}
+	telnet := Wrap(tcp)
+
+	buf := make([]byte, bufsize)
+	n, err := telnet.Read(buf)
+	require.NoError(t, err)
+	require.Equal(t, []byte{encoding.ASCIISub, encoding.ASCIISub, encoding.ASCIISub}, buf[:n])
+
+	n, err = telnet.Write([]byte{IAC, 128, 129})
+	require.NoError(t, err)
+	require.Equal(t, []byte{encoding.ASCIISub, encoding.ASCIISub, encoding.ASCIISub}, output.Bytes()[:n])
 }
