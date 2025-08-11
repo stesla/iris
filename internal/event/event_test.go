@@ -11,7 +11,7 @@ const testEvent Name = "test.event"
 func TestEventDispatch(t *testing.T) {
 	var event any
 	bus := NewDispatcher()
-	bus.Listen(testEvent, func(ev any) (err error) {
+	bus.ListenFunc(testEvent, func(ev any) (err error) {
 		event = ev
 		return nil
 	})

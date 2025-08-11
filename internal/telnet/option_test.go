@@ -48,7 +48,7 @@ func TestOptionStateReceive(t *testing.T) {
 	for i, test := range tests {
 		var eventReceived any
 		d := event.NewDispatcher()
-		d.Listen(eventSend, func(ev any) error {
+		d.ListenFunc(eventSend, func(ev any) error {
 			eventReceived = ev
 			return nil
 		})
@@ -70,7 +70,7 @@ func TestOptionStateReceive(t *testing.T) {
 func TestOptionEnableOrDisable(t *testing.T) {
 	var eventReceived any
 	d := event.NewDispatcher()
-	d.Listen(eventSend, func(ev any) error {
+	d.ListenFunc(eventSend, func(ev any) error {
 		eventReceived = ev
 		return nil
 	})
@@ -163,7 +163,7 @@ func TestOptionEnabled(t *testing.T) {
 func TestOptionMapHandleNegotiation(t *testing.T) {
 	var actual []byte
 	d := event.NewDispatcher()
-	d.Listen(eventSend, func(data any) error {
+	d.ListenFunc(eventSend, func(data any) error {
 		actual = data.([]byte)
 		return nil
 	})
@@ -188,7 +188,7 @@ func TestOptionMapHandleNegotiation(t *testing.T) {
 func TestOptionEvent(t *testing.T) {
 	var actual OptionData
 	d := event.NewDispatcher()
-	d.Listen(EventOption, func(data any) error {
+	d.ListenFunc(EventOption, func(data any) error {
 		actual = data.(OptionData)
 		return nil
 	})

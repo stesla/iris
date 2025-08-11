@@ -6,10 +6,19 @@ import (
 
 type Name string
 
-type Listener func(any) error
+type Listener interface {
+	Listen(any) error
+}
+
+type ListenerFunc func(any) error
+
+func (f ListenerFunc) Listen(data any) error {
+	return f(data)
+}
 
 type Dispatcher interface {
 	Listen(event Name, l Listener)
+	ListenFunc(event Name, fn ListenerFunc)
 	Dispatch(event Name, data any) error
 }
 
@@ -30,11 +39,15 @@ func (d *dispatcher) Listen(event Name, l Listener) {
 	d.handlers[event] = append(d.handlers[event], l)
 }
 
+func (d *dispatcher) ListenFunc(event Name, fn ListenerFunc) {
+	d.Listen(event, fn)
+}
+
 func (d *dispatcher) Dispatch(event Name, data any) (err error) {
 	d.RLock()
 	defer d.RUnlock()
 	for _, h := range d.handlers[event] {
-		if err = h(data); err != nil {
+		if err = h.Listen(data); err != nil {
 			return
 		}
 	}

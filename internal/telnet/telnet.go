@@ -47,8 +47,8 @@ func wrap(c net.Conn) *conn {
 		w:          &writer{out: c, options: options},
 	}
 	cc.SetEncoding(ASCII)
-	cc.Listen(eventNegotation, cc.handleNegotiation)
-	cc.Listen(eventSend, cc.handleSend)
+	cc.ListenFunc(eventNegotation, cc.handleNegotiation)
+	cc.ListenFunc(eventSend, cc.handleSend)
 	return cc
 }
 
