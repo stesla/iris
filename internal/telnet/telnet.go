@@ -19,6 +19,8 @@ type conn struct {
 	event.Dispatcher
 	OptionMap
 
+	ctx context.Context
+
 	readNoEnc, read   io.Reader
 	writeNoEnc, write io.Writer
 }
@@ -37,6 +39,7 @@ type contextKey int
 const (
 	KeyDispatcher contextKey = 0 + iota
 	KeyOptionMap
+	KeyEncodable
 )
 
 func wrap(c net.Conn) *conn {
@@ -46,12 +49,13 @@ func wrap(c net.Conn) *conn {
 		Conn:       c,
 		Dispatcher: dispatcher,
 		OptionMap:  options,
+		ctx:        context.Background(),
 	}
-	ctx := context.Background()
-	ctx = context.WithValue(ctx, KeyDispatcher, dispatcher)
-	ctx = context.WithValue(ctx, KeyOptionMap, options)
-	cc.readNoEnc = &reader{in: c, ctx: ctx}
-	cc.writeNoEnc = &writer{out: c, ctx: ctx}
+	cc.ctx = context.WithValue(cc.ctx, KeyDispatcher, cc)
+	cc.ctx = context.WithValue(cc.ctx, KeyOptionMap, cc)
+	cc.ctx = context.WithValue(cc.ctx, KeyEncodable, cc)
+	cc.readNoEnc = &reader{in: c, ctx: cc.ctx}
+	cc.writeNoEnc = &writer{out: c, ctx: cc.ctx}
 	cc.SetEncoding(ASCII)
 	cc.ListenFunc(eventNegotation, cc.handleNegotiation)
 	cc.ListenFunc(eventSend, cc.handleSend)
@@ -76,6 +80,14 @@ func (c *conn) handleSend(_ context.Context, data any) error {
 
 func (c *conn) Read(p []byte) (n int, err error) {
 	return c.read.Read(p)
+}
+
+type Handler interface {
+	Register(ctx context.Context)
+}
+
+func (c *conn) RegisterHandler(h Handler) {
+	h.Register(c.ctx)
 }
 
 func (c *conn) Write(p []byte) (n int, err error) {

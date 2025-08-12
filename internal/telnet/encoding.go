@@ -1,6 +1,9 @@
 package telnet
 
 import (
+	"context"
+
+	"github.com/stesla/iris/internal/event"
 	"golang.org/x/text/encoding"
 	"golang.org/x/text/transform"
 )
@@ -56,3 +59,34 @@ func (a asciiEncoding) Transform(dst, src []byte, atEOF bool) (nDst, nSrc int, e
 }
 
 func (a asciiEncoding) Reset() {}
+
+type TransmitBinaryHandler struct{}
+
+func (h *TransmitBinaryHandler) Register(ctx context.Context) {
+	options := ctx.Value(KeyOptionMap).(OptionMap)
+	options.Get(TransmitBinary).Allow(true, true)
+
+	d := ctx.Value(KeyDispatcher).(event.Dispatcher)
+	d.ListenFunc(EventOption, h.handleOption)
+}
+
+func (h *TransmitBinaryHandler) handleOption(ctx context.Context, data any) error {
+	encodable := ctx.Value(KeyEncodable).(Encodable)
+	opt := data.(OptionData)
+	if opt.ChangedUs {
+		if opt.EnabledForUs() {
+			encodable.SetWriteEncoding(encoding.Nop)
+		} else {
+			encodable.SetWriteEncoding(ASCII)
+		}
+
+	}
+	if opt.ChangedThem {
+		if opt.EnabledForThem() {
+			encodable.SetReadEncoding(encoding.Nop)
+		} else {
+			encodable.SetReadEncoding(ASCII)
+		}
+	}
+	return nil
+}
