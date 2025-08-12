@@ -1,21 +1,17 @@
 package telnet
 
 import (
+	"context"
 	"io"
 	"net"
 
 	"github.com/stesla/iris/internal/event"
-	"golang.org/x/text/encoding"
-	"golang.org/x/text/transform"
 )
 
 type Conn interface {
 	net.Conn
 	event.Dispatcher
-
-	SetEncoding(encoding.Encoding)
-	SetReadEncoding(encoding.Encoding)
-	SetWriteEncoding(encoding.Encoding)
+	Encodable
 }
 
 type conn struct {
@@ -23,8 +19,8 @@ type conn struct {
 	event.Dispatcher
 	OptionMap
 
-	r, readEncoded  io.Reader
-	w, writeEncoded io.Writer
+	readNoEnc, read   io.Reader
+	writeNoEnc, write io.Writer
 }
 
 func Dial(address string) (Conn, error) {
@@ -36,16 +32,26 @@ func Wrap(c net.Conn) Conn {
 	return wrap(c)
 }
 
+type contextKey int
+
+const (
+	KeyDispatcher contextKey = 0 + iota
+	KeyOptionMap
+)
+
 func wrap(c net.Conn) *conn {
 	dispatcher := event.NewDispatcher()
-	options := NewOptionMap(dispatcher)
+	options := NewOptionMap()
 	cc := &conn{
 		Conn:       c,
 		Dispatcher: dispatcher,
 		OptionMap:  options,
-		r:          &reader{in: c, d: dispatcher},
-		w:          &writer{out: c, options: options},
 	}
+	ctx := context.Background()
+	ctx = context.WithValue(ctx, KeyDispatcher, dispatcher)
+	ctx = context.WithValue(ctx, KeyOptionMap, options)
+	cc.readNoEnc = &reader{in: c, ctx: ctx}
+	cc.writeNoEnc = &writer{out: c, ctx: ctx}
 	cc.SetEncoding(ASCII)
 	cc.ListenFunc(eventNegotation, cc.handleNegotiation)
 	cc.ListenFunc(eventSend, cc.handleSend)
@@ -63,35 +69,22 @@ const (
 	decodeOptionNegotation
 )
 
-func (c *conn) handleSend(data any) error {
+func (c *conn) handleSend(_ context.Context, data any) error {
 	_, err := c.Conn.Write(data.([]byte))
 	return err
 }
 
 func (c *conn) Read(p []byte) (n int, err error) {
-	return c.readEncoded.Read(p)
-}
-
-func (c *conn) SetEncoding(enc encoding.Encoding) {
-	c.SetReadEncoding(enc)
-	c.SetWriteEncoding(enc)
-}
-
-func (c *conn) SetReadEncoding(enc encoding.Encoding) {
-	c.readEncoded = enc.NewDecoder().Reader(c.r)
-}
-
-func (c *conn) SetWriteEncoding(enc encoding.Encoding) {
-	c.writeEncoded = enc.NewEncoder().Writer(c.w)
+	return c.read.Read(p)
 }
 
 func (c *conn) Write(p []byte) (n int, err error) {
-	return c.writeEncoded.Write(p)
+	return c.write.Write(p)
 }
 
 type reader struct {
-	in io.Reader
-	d  event.Dispatcher
+	in  io.Reader
+	ctx context.Context
 
 	cmd    byte
 	ds     decodeState
@@ -115,6 +108,8 @@ func (r *reader) Read(p []byte) (n int, err error) {
 		p[n] = buf[0]
 		n++
 	}
+
+	d := r.ctx.Value(KeyDispatcher).(event.Dispatcher)
 
 	for len(buf) > 0 {
 		switch r.ds {
@@ -142,10 +137,10 @@ func (r *reader) Read(p []byte) (n int, err error) {
 			case DO, DONT, WILL, WONT:
 				r.ds = decodeOptionNegotation
 			case EOR:
-				r.d.Dispatch(eventEndOfRecord, nil)
+				d.Dispatch(r.ctx, eventEndOfRecord, nil)
 				r.ds = decodeByte
 			case GA:
-				r.d.Dispatch(eventGoAhead, nil)
+				d.Dispatch(r.ctx, eventGoAhead, nil)
 				r.ds = decodeByte
 			case SB:
 				r.ds = decodeSB
@@ -157,7 +152,7 @@ func (r *reader) Read(p []byte) (n int, err error) {
 				r.ds = decodeByte
 			}
 		case decodeOptionNegotation:
-			r.d.Dispatch(eventNegotation, &negotiation{r.cmd, buf[0]})
+			d.Dispatch(r.ctx, eventNegotation, &negotiation{r.cmd, buf[0]})
 			r.ds = decodeByte
 		case decodeSB:
 			switch buf[0] {
@@ -172,7 +167,7 @@ func (r *reader) Read(p []byte) (n int, err error) {
 				r.sbdata = append(r.sbdata, IAC)
 				r.ds = decodeSB
 			case SE:
-				r.d.Dispatch(eventSubnegotiation, &subnegotiation{
+				d.Dispatch(r.ctx, eventSubnegotiation, &subnegotiation{
 					opt:  r.sbdata[0],
 					data: r.sbdata[1:],
 				})
@@ -189,8 +184,8 @@ func (r *reader) Read(p []byte) (n int, err error) {
 }
 
 type writer struct {
-	out     io.Writer
-	options OptionMap
+	out io.Writer
+	ctx context.Context
 }
 
 func (w *writer) Write(p []byte) (n int, err error) {
@@ -218,47 +213,14 @@ func (w *writer) Write(p []byte) (n int, err error) {
 	return
 }
 
+func (w *writer) options() OptionMap {
+	return w.ctx.Value(KeyOptionMap).(OptionMap)
+}
+
 func (w *writer) shouldSendEndOfRecord() bool {
-	return w.options.Get(EndOfRecord).EnabledForUs()
+	return w.options().Get(EndOfRecord).EnabledForUs()
 }
 
 func (w *writer) shouldSendGoAhead() bool {
-	return !w.options.Get(SuppressGoAhead).EnabledForUs()
+	return !w.options().Get(SuppressGoAhead).EnabledForUs()
 }
-
-const eventEndOfRecord event.Name = "internal.end-of-record"
-const eventGoAhead event.Name = "internal.go-ahead"
-const eventSend event.Name = "internal.send-data"
-
-var ASCII encoding.Encoding = &asciiEncoding{}
-
-type asciiEncoding struct{}
-
-func (a asciiEncoding) NewDecoder() *encoding.Decoder {
-	return &encoding.Decoder{Transformer: a}
-}
-
-func (a asciiEncoding) NewEncoder() *encoding.Encoder {
-	return &encoding.Encoder{Transformer: a}
-}
-
-func (asciiEncoding) String() string { return "ASCII" }
-
-func (a asciiEncoding) Transform(dst, src []byte, atEOF bool) (nDst, nSrc int, err error) {
-	for i, c := range src {
-		if nDst >= len(dst) {
-			err = transform.ErrShortDst
-			break
-		}
-		if c < 128 {
-			dst[nDst] = c
-		} else {
-			dst[nDst] = '\x1A'
-		}
-		nDst++
-		nSrc = i + 1
-	}
-	return
-}
-
-func (a asciiEncoding) Reset() {}

@@ -1,25 +1,26 @@
 package event
 
 import (
+	"context"
 	"sync"
 )
 
 type Name string
 
 type Listener interface {
-	Listen(any) error
+	Listen(ctx context.Context, data any) error
 }
 
-type ListenerFunc func(any) error
+type ListenerFunc func(ctx context.Context, data any) error
 
-func (f ListenerFunc) Listen(data any) error {
-	return f(data)
+func (f ListenerFunc) Listen(ctx context.Context, data any) error {
+	return f(ctx, data)
 }
 
 type Dispatcher interface {
 	Listen(event Name, l Listener)
 	ListenFunc(event Name, fn ListenerFunc)
-	Dispatch(event Name, data any) error
+	Dispatch(ctx context.Context, event Name, data any) error
 }
 
 func NewDispatcher() Dispatcher {
@@ -43,11 +44,11 @@ func (d *dispatcher) ListenFunc(event Name, fn ListenerFunc) {
 	d.Listen(event, fn)
 }
 
-func (d *dispatcher) Dispatch(event Name, data any) (err error) {
+func (d *dispatcher) Dispatch(ctx context.Context, event Name, data any) (err error) {
 	d.RLock()
 	defer d.RUnlock()
 	for _, h := range d.handlers[event] {
-		if err = h.Listen(data); err != nil {
+		if err = h.Listen(ctx, data); err != nil {
 			return
 		}
 	}

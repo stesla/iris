@@ -2,6 +2,7 @@ package telnet
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"io"
 	"net"
@@ -146,17 +147,17 @@ func TestReadCommand(t *testing.T) {
 	}
 	for _, test := range tests {
 		var event any
-		captureEvent := func(ev any) error {
+		captureEvent := func(_ context.Context, ev any) error {
 			event = ev
 			return nil
 		}
 		tcp := &mockConn{Reader: bytes.NewReader(test.val), Writer: io.Discard}
 		telnet := wrap(tcp)
-		telnet.ListenFunc(eventEndOfRecord, func(any) error {
+		telnet.ListenFunc(eventEndOfRecord, func(context.Context, any) error {
 			event = "end of record"
 			return nil
 		})
-		telnet.ListenFunc(eventGoAhead, func(any) error {
+		telnet.ListenFunc(eventGoAhead, func(context.Context, any) error {
 			event = "go ahead"
 			return nil
 		})
@@ -189,19 +190,4 @@ func TestEndOfRecord(t *testing.T) {
 	_, err := telnet.Write([]byte("foo"))
 	require.NoError(t, err)
 	require.Equal(t, []byte{'f', 'o', 'o', IAC, EOR}, output.Bytes())
-}
-
-func TestDefaultEncodingASCII(t *testing.T) {
-	var output bytes.Buffer
-	tcp := &mockConn{Reader: bytes.NewBuffer([]byte{IAC, IAC, 128, 129}), Writer: &output}
-	telnet := Wrap(tcp)
-
-	buf := make([]byte, bufsize)
-	n, err := telnet.Read(buf)
-	require.NoError(t, err)
-	require.Equal(t, []byte{encoding.ASCIISub, encoding.ASCIISub, encoding.ASCIISub}, buf[:n])
-
-	n, err = telnet.Write([]byte{IAC, 128, 129})
-	require.NoError(t, err)
-	require.Equal(t, []byte{encoding.ASCIISub, encoding.ASCIISub, encoding.ASCIISub}, output.Bytes()[:n])
 }

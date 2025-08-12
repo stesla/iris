@@ -1,6 +1,7 @@
 package telnet
 
 import (
+	"context"
 	"math"
 
 	"github.com/stesla/iris/internal/event"
@@ -10,33 +11,24 @@ type OptionState interface {
 	Allow(them, us bool)
 	AllowThem(bool)
 	AllowUs(bool)
-	DisableForThem(d event.Dispatcher)
-	DisableForUs(d event.Dispatcher)
-	EnableForThem(d event.Dispatcher)
-	EnableForUs(d event.Dispatcher)
+	DisableForThem(ctx context.Context)
+	DisableForUs(ctx context.Context)
+	EnableForThem(ctx context.Context)
+	EnableForUs(ctx context.Context)
 	EnabledForThem() bool
 	EnabledForUs() bool
 	Option() byte
 }
 
-const EventOption event.Name = "telnet.event.option"
-
-type OptionData struct {
-	OptionState
-	ChangedThem bool
-	ChangedUs   bool
-}
-
 type OptionMap interface {
 	Get(opt byte) OptionState
 
-	handleNegotiation(data any) error
+	handleNegotiation(ctx context.Context, data any) error
 	set(OptionState)
 }
 
-func NewOptionMap(d event.Dispatcher) OptionMap {
+func NewOptionMap() OptionMap {
 	result := &optionMap{
-		d: d,
 		m: make(map[byte]*optionState, math.MaxUint8),
 	}
 	for opt := range byte(math.MaxUint8) {
@@ -46,7 +38,6 @@ func NewOptionMap(d event.Dispatcher) OptionMap {
 }
 
 type optionMap struct {
-	d event.Dispatcher
 	m map[byte]*optionState
 }
 
@@ -54,10 +45,10 @@ func (m *optionMap) Get(opt byte) OptionState {
 	return m.m[opt]
 }
 
-func (m *optionMap) handleNegotiation(data any) error {
+func (m *optionMap) handleNegotiation(ctx context.Context, data any) error {
 	negotiation := data.(*negotiation)
 	opt := m.m[negotiation.opt]
-	opt.receive(m.d, negotiation.cmd)
+	opt.receive(ctx, negotiation.cmd)
 	return nil
 }
 
@@ -98,20 +89,20 @@ func (o *optionState) AllowUs(allow bool) {
 	o.allowUs = allow
 }
 
-func (o *optionState) DisableForThem(d event.Dispatcher) {
-	o.disable(d, &o.them, DONT)
+func (o *optionState) DisableForThem(ctx context.Context) {
+	o.disable(ctx, &o.them, DONT)
 }
 
-func (o *optionState) DisableForUs(d event.Dispatcher) {
-	o.disable(d, &o.us, WONT)
+func (o *optionState) DisableForUs(ctx context.Context) {
+	o.disable(ctx, &o.us, WONT)
 }
 
-func (o *optionState) EnableForThem(d event.Dispatcher) {
-	o.enable(d, &o.them, DO)
+func (o *optionState) EnableForThem(ctx context.Context) {
+	o.enable(ctx, &o.them, DO)
 }
 
-func (o *optionState) EnableForUs(d event.Dispatcher) {
-	o.enable(d, &o.us, WILL)
+func (o *optionState) EnableForUs(ctx context.Context) {
+	o.enable(ctx, &o.us, WILL)
 }
 
 func (o *optionState) EnabledForThem() bool { return o.them == qYes }
@@ -119,13 +110,14 @@ func (o *optionState) EnabledForUs() bool   { return o.us == qYes }
 
 func (o *optionState) Option() byte { return o.opt }
 
-func (o *optionState) disable(d event.Dispatcher, state *qState, b byte) {
+func (o *optionState) disable(ctx context.Context, state *qState, b byte) {
+	d := ctx.Value(KeyDispatcher).(event.Dispatcher)
 	switch *state {
 	case qNo:
 		// ignore
 	case qYes:
 		*state = qWantNoEmpty
-		d.Dispatch(eventSend, o.sendCmd(b))
+		d.Dispatch(ctx, eventSend, o.sendCmd(b))
 	case qWantNoEmpty:
 		// ignore
 	case qWantNoOpposite:
@@ -137,11 +129,12 @@ func (o *optionState) disable(d event.Dispatcher, state *qState, b byte) {
 	}
 }
 
-func (o *optionState) enable(d event.Dispatcher, state *qState, b byte) {
+func (o *optionState) enable(ctx context.Context, state *qState, b byte) {
+	d := ctx.Value(KeyDispatcher).(event.Dispatcher)
 	switch *state {
 	case qNo:
 		*state = qWantYesEmpty
-		d.Dispatch(eventSend, o.sendCmd(b))
+		d.Dispatch(ctx, eventSend, o.sendCmd(b))
 	case qYes:
 		// ignore
 	case qWantNoEmpty:
@@ -155,7 +148,8 @@ func (o *optionState) enable(d event.Dispatcher, state *qState, b byte) {
 	}
 }
 
-func (o *optionState) receive(d event.Dispatcher, b byte) {
+func (o *optionState) receive(ctx context.Context, b byte) {
+	d := ctx.Value(KeyDispatcher).(event.Dispatcher)
 	var themBefore, usBefore = o.them, o.us
 	var allow *bool
 	var state *qState
@@ -179,9 +173,9 @@ func (o *optionState) receive(d event.Dispatcher, b byte) {
 		case qNo:
 			if *allow {
 				*state = qYes
-				d.Dispatch(eventSend, o.sendCmd(accept))
+				d.Dispatch(ctx, eventSend, o.sendCmd(accept))
 			} else {
-				d.Dispatch(eventSend, o.sendCmd(reject))
+				d.Dispatch(ctx, eventSend, o.sendCmd(reject))
 			}
 		case qYes:
 			// ignore
@@ -193,7 +187,7 @@ func (o *optionState) receive(d event.Dispatcher, b byte) {
 			*state = qYes
 		case qWantYesOpposite:
 			*state = qWantNoEmpty
-			d.Dispatch(eventSend, o.sendCmd(reject))
+			d.Dispatch(ctx, eventSend, o.sendCmd(reject))
 		}
 	case DONT, WONT:
 		switch *state {
@@ -201,12 +195,12 @@ func (o *optionState) receive(d event.Dispatcher, b byte) {
 			// ignore
 		case qYes:
 			*state = qNo
-			d.Dispatch(eventSend, o.sendCmd(reject))
+			d.Dispatch(ctx, eventSend, o.sendCmd(reject))
 		case qWantNoEmpty:
 			*state = qNo
 		case qWantNoOpposite:
 			*state = qWantYesEmpty
-			d.Dispatch(eventSend, o.sendCmd(accept))
+			d.Dispatch(ctx, eventSend, o.sendCmd(accept))
 		case qWantYesEmpty:
 			*state = qNo
 		case qWantYesOpposite:
@@ -214,7 +208,7 @@ func (o *optionState) receive(d event.Dispatcher, b byte) {
 		}
 	}
 	if changedThem, changedUs := themBefore != o.them, usBefore != o.us; changedThem || changedUs {
-		d.Dispatch(EventOption, OptionData{
+		d.Dispatch(ctx, EventOption, OptionData{
 			OptionState: o,
 			ChangedThem: changedThem,
 			ChangedUs:   changedUs,
@@ -225,18 +219,4 @@ func (o *optionState) receive(d event.Dispatcher, b byte) {
 
 func (o *optionState) sendCmd(b byte) any {
 	return []byte{IAC, b, o.opt}
-}
-
-const eventNegotation event.Name = "internal.option.negotiation"
-
-type negotiation struct {
-	cmd byte
-	opt byte
-}
-
-const eventSubnegotiation event.Name = "internal.option.subnegotiation"
-
-type subnegotiation struct {
-	opt  byte
-	data []byte
 }

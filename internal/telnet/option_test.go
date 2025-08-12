@@ -1,6 +1,7 @@
 package telnet
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stesla/iris/internal/event"
@@ -48,15 +49,16 @@ func TestOptionStateReceive(t *testing.T) {
 	for i, test := range tests {
 		var eventReceived any
 		d := event.NewDispatcher()
-		d.ListenFunc(eventSend, func(ev any) error {
+		d.ListenFunc(eventSend, func(_ context.Context, ev any) error {
 			eventReceived = ev
 			return nil
 		})
+		ctx := context.WithValue(context.Background(), KeyDispatcher, d)
 		state := test.start
 		state.opt = Echo
 		expected := test.end
 		expected.opt = Echo
-		state.receive(d, test.b)
+		state.receive(ctx, test.b)
 		require.Equal(t, expected, state, i)
 		if data, ok := test.ev.([]byte); ok {
 			data = append(data, Echo)
@@ -70,15 +72,16 @@ func TestOptionStateReceive(t *testing.T) {
 func TestOptionEnableOrDisable(t *testing.T) {
 	var eventReceived any
 	d := event.NewDispatcher()
-	d.ListenFunc(eventSend, func(ev any) error {
+	d.ListenFunc(eventSend, func(_ context.Context, ev any) error {
 		eventReceived = ev
 		return nil
 	})
+	ctx := context.WithValue(context.Background(), KeyDispatcher, d)
 
-	disableThem := func(os *optionState) { os.DisableForThem(d) }
-	disableUs := func(os *optionState) { os.DisableForUs(d) }
-	enableThem := func(os *optionState) { os.EnableForThem(d) }
-	enableUs := func(os *optionState) { os.EnableForUs(d) }
+	disableThem := func(os *optionState) { os.DisableForThem(ctx) }
+	disableUs := func(os *optionState) { os.DisableForUs(ctx) }
+	enableThem := func(os *optionState) { os.EnableForThem(ctx) }
+	enableUs := func(os *optionState) { os.EnableForUs(ctx) }
 	var tests = []struct {
 		fn    func(*optionState)
 		start optionState
@@ -163,11 +166,12 @@ func TestOptionEnabled(t *testing.T) {
 func TestOptionMapHandleNegotiation(t *testing.T) {
 	var actual []byte
 	d := event.NewDispatcher()
-	d.ListenFunc(eventSend, func(data any) error {
+	d.ListenFunc(eventSend, func(_ context.Context, data any) error {
 		actual = data.([]byte)
 		return nil
 	})
-	m := NewOptionMap(d)
+	ctx := context.WithValue(context.Background(), KeyDispatcher, d)
+	m := NewOptionMap()
 	m.Get(Echo).Allow(true, true)
 	var tests = []struct {
 		data     negotiation
@@ -180,7 +184,7 @@ func TestOptionMapHandleNegotiation(t *testing.T) {
 	}
 	for _, test := range tests {
 		actual = nil
-		m.handleNegotiation(&test.data)
+		m.handleNegotiation(ctx, &test.data)
 		require.Equal(t, test.expected, actual)
 	}
 }
@@ -188,10 +192,11 @@ func TestOptionMapHandleNegotiation(t *testing.T) {
 func TestOptionEvent(t *testing.T) {
 	var actual OptionData
 	d := event.NewDispatcher()
-	d.ListenFunc(EventOption, func(data any) error {
+	d.ListenFunc(EventOption, func(_ context.Context, data any) error {
 		actual = data.(OptionData)
 		return nil
 	})
+	ctx := context.WithValue(context.Background(), KeyDispatcher, d)
 	var tests = []struct {
 		state    optionState
 		cmd      byte
@@ -209,7 +214,7 @@ func TestOptionEvent(t *testing.T) {
 	for _, test := range tests {
 		actual = OptionData{}
 		state := test.state
-		state.receive(d, test.cmd)
+		state.receive(ctx, test.cmd)
 		require.Equal(t, test.expected, actual)
 	}
 }
