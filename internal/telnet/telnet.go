@@ -12,6 +12,8 @@ type Conn interface {
 	net.Conn
 	event.Dispatcher
 	Encodable
+
+	RegisterHandler(Handler) (unregister func())
 }
 
 type conn struct {
@@ -84,10 +86,14 @@ func (c *conn) Read(p []byte) (n int, err error) {
 
 type Handler interface {
 	Register(ctx context.Context)
+	Unregister(ctx context.Context)
 }
 
-func (c *conn) RegisterHandler(h Handler) {
+func (c *conn) RegisterHandler(h Handler) func() {
 	h.Register(c.ctx)
+	return func() {
+		h.Unregister(c.ctx)
+	}
 }
 
 func (c *conn) Write(p []byte) (n int, err error) {

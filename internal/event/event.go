@@ -2,6 +2,7 @@ package event
 
 import (
 	"context"
+	"slices"
 	"sync"
 )
 
@@ -19,8 +20,9 @@ func (f ListenerFunc) Listen(ctx context.Context, data any) error {
 
 type Dispatcher interface {
 	Listen(event Name, l Listener)
-	ListenFunc(event Name, fn ListenerFunc)
+	ListenFunc(event Name, fn ListenerFunc) Listener
 	Dispatch(ctx context.Context, event Name, data any) error
+	RemoveListener(event Name, l Listener)
 }
 
 func NewDispatcher() Dispatcher {
@@ -40,8 +42,10 @@ func (d *dispatcher) Listen(event Name, l Listener) {
 	d.handlers[event] = append(d.handlers[event], l)
 }
 
-func (d *dispatcher) ListenFunc(event Name, fn ListenerFunc) {
-	d.Listen(event, fn)
+func (d *dispatcher) ListenFunc(event Name, fn ListenerFunc) (l Listener) {
+	l = &fn
+	d.Listen(event, l)
+	return
 }
 
 func (d *dispatcher) Dispatch(ctx context.Context, event Name, data any) (err error) {
@@ -53,4 +57,12 @@ func (d *dispatcher) Dispatch(ctx context.Context, event Name, data any) (err er
 		}
 	}
 	return
+}
+
+func (d *dispatcher) RemoveListener(event Name, l Listener) {
+	d.Lock()
+	defer d.Unlock()
+	d.handlers[event] = slices.DeleteFunc(d.handlers[event], func(ll Listener) bool {
+		return l == ll
+	})
 }

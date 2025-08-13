@@ -67,25 +67,43 @@ func (h *TransmitBinaryHandler) Register(ctx context.Context) {
 	options.Get(TransmitBinary).Allow(true, true)
 
 	d := ctx.Value(KeyDispatcher).(event.Dispatcher)
-	d.ListenFunc(EventOption, h.handleOption)
+	d.Listen(EventOption, h)
 }
 
-func (h *TransmitBinaryHandler) handleOption(ctx context.Context, data any) error {
-	encodable := ctx.Value(KeyEncodable).(Encodable)
-	opt := data.(OptionData)
-	if opt.ChangedUs {
-		if opt.EnabledForUs() {
-			encodable.SetWriteEncoding(encoding.Nop)
-		} else {
-			encodable.SetWriteEncoding(ASCII)
-		}
+func (h *TransmitBinaryHandler) Unregister(ctx context.Context) {
+	d := ctx.Value(KeyDispatcher).(event.Dispatcher)
+	d.RemoveListener(EventOption, h)
 
-	}
-	if opt.ChangedThem {
-		if opt.EnabledForThem() {
-			encodable.SetReadEncoding(encoding.Nop)
-		} else {
-			encodable.SetReadEncoding(ASCII)
+	options := ctx.Value(KeyOptionMap).(OptionMap)
+	options.Get(TransmitBinary).Allow(false, false)
+	options.Get(TransmitBinary).DisableForThem(ctx)
+	options.Get(TransmitBinary).DisableForUs(ctx)
+
+	encodable := ctx.Value(KeyEncodable).(Encodable)
+	encodable.SetEncoding(ASCII)
+}
+
+func (h *TransmitBinaryHandler) Listen(ctx context.Context, data any) error {
+	switch opt := data.(type) {
+	case OptionData:
+		switch opt.OptionState.Option() {
+		case TransmitBinary:
+			encodable := ctx.Value(KeyEncodable).(Encodable)
+			if opt.ChangedUs {
+				if opt.EnabledForUs() {
+					encodable.SetWriteEncoding(encoding.Nop)
+				} else {
+					encodable.SetWriteEncoding(ASCII)
+				}
+
+			}
+			if opt.ChangedThem {
+				if opt.EnabledForThem() {
+					encodable.SetReadEncoding(encoding.Nop)
+				} else {
+					encodable.SetReadEncoding(ASCII)
+				}
+			}
 		}
 	}
 	return nil

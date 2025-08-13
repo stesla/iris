@@ -20,3 +20,18 @@ func TestEventDispatch(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 42, event)
 }
+
+func TestRemoveListener(t *testing.T) {
+	var called bool
+	fn := func(context.Context, any) error {
+		called = true
+		return nil
+	}
+
+	bus := NewDispatcher()
+	l := bus.ListenFunc(testEvent, fn)
+	bus.RemoveListener(testEvent, l)
+	err := bus.Dispatch(context.Background(), testEvent, 42)
+	require.NoError(t, err)
+	require.False(t, called)
+}
