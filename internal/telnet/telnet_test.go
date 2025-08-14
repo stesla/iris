@@ -62,7 +62,7 @@ func TestRead(t *testing.T) {
 	for _, test := range tests {
 		tcp := &mockConn{}
 		telnet := Wrap(tcp)
-		telnet.SetEncoding(encoding.Nop)
+		telnet.SetReadEncoding(encoding.Nop)
 		buf := make([]byte, bufsize)
 		n := 0
 		for _, val := range test.vals {
@@ -123,7 +123,7 @@ func TestWrite(t *testing.T) {
 		var buf bytes.Buffer
 		tcp := &mockConn{Writer: &buf}
 		telnet := Wrap(tcp)
-		telnet.SetEncoding(encoding.Nop)
+		telnet.SetWriteEncoding(encoding.Nop)
 		n, err := telnet.Write(test.val)
 		require.NoError(t, err)
 		require.Equal(t, len(test.val), n)

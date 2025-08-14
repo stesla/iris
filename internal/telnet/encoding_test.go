@@ -6,6 +6,7 @@ import (
 	"io"
 	"testing"
 
+	"github.com/stesla/iris/internal/event"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/text/encoding"
 	"golang.org/x/text/encoding/charmap"
@@ -179,5 +180,77 @@ func TestCharsetSubnegotiation(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, test.expected, bytesSent)
 		require.Equal(t, test.event, event)
+	}
+}
+
+type mockEncodable struct {
+	readEnc, writeEnc encoding.Encoding
+}
+
+func (m *mockEncodable) SetReadEncoding(enc encoding.Encoding) {
+	m.readEnc = enc
+}
+
+func (m *mockEncodable) SetWriteEncoding(enc encoding.Encoding) {
+	m.writeEnc = enc
+}
+
+type Event struct {
+	event.Name
+	Data any
+}
+
+func TestCharsetSetsEncoding(t *testing.T) {
+	dispatcher := event.NewDispatcher()
+	options := NewOptionMap()
+	options.set(&optionState{opt: Charset, them: qYes, us: qYes})
+	dispatcher.ListenFunc(EventOption, func(_ context.Context, data any) error {
+		switch opt := data.(type) {
+		case OptionData:
+			options.set(opt.OptionState)
+		}
+		return nil
+	})
+	encodable := &mockEncodable{}
+	ctx := context.Background()
+	ctx = context.WithValue(ctx, KeyDispatcher, dispatcher)
+	ctx = context.WithValue(ctx, KeyOptionMap, options)
+	ctx = context.WithValue(ctx, KeyEncodable, encodable)
+	tests := []struct {
+		events                            []Event
+		expectedReadEnc, expectedWriteEnc encoding.Encoding
+	}{
+		{[]Event{
+			{EventCharsetAccepted, CharsetData{Encoding: unicode.UTF8}},
+		}, nil, nil},
+		{[]Event{
+			{EventCharsetAccepted, CharsetData{Encoding: unicode.UTF8}},
+			{EventOption, OptionData{OptionState: &optionState{opt: TransmitBinary, them: qYes, us: qYes}, ChangedThem: true, ChangedUs: true}},
+		}, unicode.UTF8, unicode.UTF8},
+		{[]Event{
+			{EventOption, OptionData{OptionState: &optionState{opt: TransmitBinary, them: qYes, us: qYes}, ChangedThem: true, ChangedUs: true}},
+			{EventCharsetAccepted, CharsetData{Encoding: unicode.UTF8}},
+		}, unicode.UTF8, unicode.UTF8},
+		{[]Event{
+			{EventOption, OptionData{OptionState: &optionState{opt: TransmitBinary, them: qYes, us: qYes}, ChangedThem: true, ChangedUs: true}},
+			{EventCharsetAccepted, CharsetData{Encoding: unicode.UTF8}},
+			{EventOption, OptionData{OptionState: &optionState{opt: TransmitBinary, them: qYes, us: qNo}, ChangedThem: false, ChangedUs: true}},
+		}, ASCII, ASCII},
+		{[]Event{
+			{EventOption, OptionData{OptionState: &optionState{opt: TransmitBinary, them: qYes, us: qYes}, ChangedThem: true, ChangedUs: true}},
+			{EventCharsetAccepted, CharsetData{Encoding: unicode.UTF8}},
+			{EventOption, OptionData{OptionState: &optionState{opt: TransmitBinary, them: qNo, us: qYes}, ChangedThem: true, ChangedUs: false}},
+		}, ASCII, ASCII},
+	}
+	for _, test := range tests {
+		options.set(&optionState{opt: TransmitBinary})
+		h := &CharsetHandler{}
+		*encodable = mockEncodable{}
+		h.Register(ctx)
+		for _, event := range test.events {
+			Dispatch(ctx, event.Name, event.Data)
+		}
+		require.Equal(t, test.expectedReadEnc, encodable.readEnc)
+		require.Equal(t, test.expectedWriteEnc, encodable.writeEnc)
 	}
 }

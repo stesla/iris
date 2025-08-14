@@ -60,7 +60,8 @@ func wrap(c net.Conn) *conn {
 	cc.ctx = context.WithValue(cc.ctx, KeyEncodable, cc)
 	cc.readNoEnc = &reader{in: c, ctx: cc.ctx}
 	cc.writeNoEnc = &writer{out: c, ctx: cc.ctx}
-	cc.SetEncoding(ASCII)
+	cc.SetReadEncoding(ASCII)
+	cc.SetWriteEncoding(ASCII)
 	cc.ListenFunc(eventNegotation, cc.handleNegotiation)
 	cc.ListenFunc(eventSend, cc.handleSend)
 	return cc

@@ -11,14 +11,8 @@ import (
 )
 
 type Encodable interface {
-	SetEncoding(encoding.Encoding)
 	SetReadEncoding(encoding.Encoding)
 	SetWriteEncoding(encoding.Encoding)
-}
-
-func (c *conn) SetEncoding(enc encoding.Encoding) {
-	c.SetReadEncoding(enc)
-	c.SetWriteEncoding(enc)
 }
 
 func (c *conn) SetReadEncoding(enc encoding.Encoding) {
@@ -81,8 +75,7 @@ func (h *TransmitBinaryHandler) Unregister(ctx context.Context) {
 	options.Get(TransmitBinary).DisableForThem(ctx)
 	options.Get(TransmitBinary).DisableForUs(ctx)
 
-	encodable := ctx.Value(KeyEncodable).(Encodable)
-	encodable.SetEncoding(ASCII)
+	SetEncoding(ctx, ASCII)
 }
 
 func (h *TransmitBinaryHandler) Listen(ctx context.Context, data any) error {
@@ -112,6 +105,7 @@ func (h *TransmitBinaryHandler) Listen(ctx context.Context, data any) error {
 }
 
 type CharsetHandler struct {
+	enc encoding.Encoding
 }
 
 func (h *CharsetHandler) Register(ctx context.Context) {
@@ -121,34 +115,42 @@ func (h *CharsetHandler) Register(ctx context.Context) {
 	d := ctx.Value(KeyDispatcher).(event.Dispatcher)
 	d.Listen(EventOption, h)
 	d.Listen(eventSubnegotiation, h)
+	d.Listen(EventCharsetAccepted, h)
+	d.Listen(EventCharsetRejected, h)
 }
 
 func (h *CharsetHandler) Unregister(ctx context.Context) {
 	d := ctx.Value(KeyDispatcher).(event.Dispatcher)
+	d.RemoveListener(EventCharsetRejected, h)
+	d.RemoveListener(EventCharsetAccepted, h)
 	d.RemoveListener(eventSubnegotiation, h)
 	d.RemoveListener(EventOption, h)
 
 	options := ctx.Value(KeyOptionMap).(OptionMap)
 	options.Get(Charset).Allow(false, false)
-	options.Get(Charset).DisableForThem(ctx)
-	options.Get(Charset).DisableForUs(ctx)
-
-	encodable := ctx.Value(KeyEncodable).(Encodable)
-	// TODO: this should be more intelligent
-	encodable.SetEncoding(encoding.Nop)
 }
 
 func (h *CharsetHandler) Listen(ctx context.Context, data any) error {
-	switch opt := data.(type) {
+	switch t := data.(type) {
+	case CharsetData:
+		h.enc = t.Encoding
+		opt := ctx.Value(KeyOptionMap).(OptionMap).Get(TransmitBinary)
+		if them, us := opt.EnabledForThem(), opt.EnabledForUs(); them && us {
+			SetEncoding(ctx, h.enc)
+		}
 	case OptionData:
-		switch opt.OptionState.Option() {
-		case Charset:
+		switch t.Option() {
 		case TransmitBinary:
+			if them, us := t.EnabledForThem(), t.EnabledForUs(); them && us {
+				SetEncoding(ctx, h.enc)
+			} else {
+				SetEncoding(ctx, ASCII)
+			}
 		}
 	case *subnegotiation:
-		switch opt.opt {
+		switch t.opt {
 		case Charset:
-			switch cmd, data := opt.data[0], opt.data[1:]; cmd {
+			switch cmd, data := t.data[0], t.data[1:]; cmd {
 			case CharsetAccepted:
 				enc := h.getEncoding(data)
 				Dispatch(ctx, EventCharsetAccepted, CharsetData{Encoding: enc})
@@ -162,6 +164,12 @@ func (h *CharsetHandler) Listen(ctx context.Context, data any) error {
 		}
 	}
 	return nil
+}
+
+func SetEncoding(ctx context.Context, enc encoding.Encoding) {
+	encodable := ctx.Value(KeyEncodable).(Encodable)
+	encodable.SetReadEncoding(enc)
+	encodable.SetWriteEncoding(enc)
 }
 
 func Dispatch(ctx context.Context, eventName event.Name, data any) {
