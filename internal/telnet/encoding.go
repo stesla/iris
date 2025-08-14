@@ -15,12 +15,10 @@ type Encodable interface {
 	SetWriteEncoding(encoding.Encoding)
 }
 
-func (c *conn) SetReadEncoding(enc encoding.Encoding) {
-	c.read = enc.NewDecoder().Reader(c.readNoEnc)
-}
-
-func (c *conn) SetWriteEncoding(enc encoding.Encoding) {
-	c.write = enc.NewEncoder().Writer(c.writeNoEnc)
+func SetEncoding(ctx context.Context, enc encoding.Encoding) {
+	encodable := ctx.Value(KeyEncodable).(Encodable)
+	encodable.SetReadEncoding(enc)
+	encodable.SetWriteEncoding(enc)
 }
 
 var ASCII encoding.Encoding = &asciiEncoding{}
@@ -59,8 +57,7 @@ func (a asciiEncoding) Reset() {}
 type TransmitBinaryHandler struct{}
 
 func (h *TransmitBinaryHandler) Register(ctx context.Context) {
-	options := ctx.Value(KeyOptionMap).(OptionMap)
-	options.Get(TransmitBinary).Allow(true, true)
+	GetOption(ctx, TransmitBinary).Allow(true, true)
 
 	d := ctx.Value(KeyDispatcher).(event.Dispatcher)
 	d.Listen(EventOption, h)
@@ -70,10 +67,10 @@ func (h *TransmitBinaryHandler) Unregister(ctx context.Context) {
 	d := ctx.Value(KeyDispatcher).(event.Dispatcher)
 	d.RemoveListener(EventOption, h)
 
-	options := ctx.Value(KeyOptionMap).(OptionMap)
-	options.Get(TransmitBinary).Allow(false, false)
-	options.Get(TransmitBinary).DisableForThem(ctx)
-	options.Get(TransmitBinary).DisableForUs(ctx)
+	opt := GetOption(ctx, TransmitBinary)
+	opt.Allow(false, false)
+	opt.DisableForThem(ctx)
+	opt.DisableForUs(ctx)
 
 	SetEncoding(ctx, ASCII)
 }
@@ -109,8 +106,7 @@ type CharsetHandler struct {
 }
 
 func (h *CharsetHandler) Register(ctx context.Context) {
-	options := ctx.Value(KeyOptionMap).(OptionMap)
-	options.Get(Charset).Allow(true, true)
+	GetOption(ctx, Charset).Allow(true, true)
 
 	d := ctx.Value(KeyDispatcher).(event.Dispatcher)
 	d.Listen(EventOption, h)
@@ -120,21 +116,20 @@ func (h *CharsetHandler) Register(ctx context.Context) {
 }
 
 func (h *CharsetHandler) Unregister(ctx context.Context) {
+	GetOption(ctx, Charset).Allow(false, false)
+
 	d := ctx.Value(KeyDispatcher).(event.Dispatcher)
 	d.RemoveListener(EventCharsetRejected, h)
 	d.RemoveListener(EventCharsetAccepted, h)
 	d.RemoveListener(eventSubnegotiation, h)
 	d.RemoveListener(EventOption, h)
-
-	options := ctx.Value(KeyOptionMap).(OptionMap)
-	options.Get(Charset).Allow(false, false)
 }
 
 func (h *CharsetHandler) Listen(ctx context.Context, ev event.Event) error {
 	switch t := ev.Data.(type) {
 	case CharsetData:
 		h.enc = t.Encoding
-		opt := ctx.Value(KeyOptionMap).(OptionMap).Get(TransmitBinary)
+		opt := GetOption(ctx, TransmitBinary)
 		if them, us := opt.EnabledForThem(), opt.EnabledForUs(); them && us {
 			SetEncoding(ctx, h.enc)
 		}
@@ -153,28 +148,17 @@ func (h *CharsetHandler) Listen(ctx context.Context, ev event.Event) error {
 			switch cmd, data := t.data[0], t.data[1:]; cmd {
 			case CharsetAccepted:
 				enc := h.getEncoding(data)
-				Dispatch(ctx, EventCharsetAccepted, CharsetData{Encoding: enc})
+				Dispatch(ctx, event.Event{Name: EventCharsetAccepted, Data: CharsetData{Encoding: enc}})
 			case CharsetRejected:
-				Dispatch(ctx, EventCharsetRejected, nil)
+				Dispatch(ctx, event.Event{Name: EventCharsetRejected})
 			case CharsetRequest:
 				return h.handleCharsetRequest(ctx, data)
 			case CharsetTTableIs:
-				Dispatch(ctx, eventSend, []byte{IAC, SB, Charset, CharsetTTableRejected, IAC, SE})
+				Dispatch(ctx, event.Event{Name: eventSend, Data: []byte{IAC, SB, Charset, CharsetTTableRejected, IAC, SE}})
 			}
 		}
 	}
 	return nil
-}
-
-func SetEncoding(ctx context.Context, enc encoding.Encoding) {
-	encodable := ctx.Value(KeyEncodable).(Encodable)
-	encodable.SetReadEncoding(enc)
-	encodable.SetWriteEncoding(enc)
-}
-
-func Dispatch(ctx context.Context, eventName event.Name, data any) {
-	d := ctx.Value(KeyDispatcher).(event.Dispatcher)
-	d.Dispatch(ctx, event.Event{Name: eventName, Data: data})
 }
 
 func (h *CharsetHandler) handleCharsetRequest(ctx context.Context, data []byte) error {
@@ -195,13 +179,13 @@ func (h *CharsetHandler) handleCharsetRequest(ctx context.Context, data []byte) 
 	}
 
 	if enc == nil {
-		Dispatch(ctx, eventSend, []byte{IAC, SB, Charset, CharsetRejected, IAC, SE})
+		Dispatch(ctx, event.Event{Name: eventSend, Data: []byte{IAC, SB, Charset, CharsetRejected, IAC, SE}})
 	} else {
 		out := []byte{IAC, SB, Charset, CharsetAccepted}
 		out = append(out, charset...)
 		out = append(out, IAC, SE)
-		Dispatch(ctx, eventSend, out)
-		Dispatch(ctx, EventCharsetAccepted, CharsetData{Encoding: enc})
+		Dispatch(ctx, event.Event{Name: eventSend, Data: out})
+		Dispatch(ctx, event.Event{Name: EventCharsetAccepted, Data: CharsetData{Encoding: enc}})
 	}
 	return nil
 }

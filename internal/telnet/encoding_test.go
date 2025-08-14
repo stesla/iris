@@ -34,7 +34,7 @@ func TestTransmitBinary(t *testing.T) {
 	telnet := Wrap(tcp)
 
 	unregister := telnet.RegisterHandler(&TransmitBinaryHandler{})
-	telnet.Dispatch(telnet.Context(), event.Event{
+	Dispatch(telnet.Context(), event.Event{
 		Name: EventOption,
 		Data: OptionData{OptionState: &optionState{opt: TransmitBinary, them: qYes, us: qYes}, ChangedThem: true, ChangedUs: true},
 	})
@@ -50,11 +50,11 @@ func TestTransmitBinary(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []byte{IAC, IAC, 254, 253}, output.Bytes()[:n+1])
 
-	telnet.Dispatch(telnet.Context(), event.Event{
+	Dispatch(telnet.Context(), event.Event{
 		Name: EventOption,
 		Data: OptionData{OptionState: &optionState{opt: TransmitBinary, them: qNo, us: qNo}, ChangedThem: true, ChangedUs: true},
 	})
-	telnet.Dispatch(telnet.Context(), event.Event{
+	Dispatch(telnet.Context(), event.Event{
 		Name: EventOption,
 		Data: OptionData{OptionState: &optionState{opt: SuppressGoAhead, them: qYes, us: qYes}, ChangedThem: true, ChangedUs: true},
 	})
@@ -69,7 +69,7 @@ func TestTransmitBinary(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []byte{encoding.ASCIISub, encoding.ASCIISub, encoding.ASCIISub}, output.Bytes()[:n])
 
-	telnet.Dispatch(telnet.Context(), event.Event{
+	Dispatch(telnet.Context(), event.Event{
 		Name: EventOption,
 		Data: OptionData{OptionState: &optionState{opt: TransmitBinary, them: qYes, us: qYes}, ChangedThem: true, ChangedUs: true},
 	})
@@ -94,8 +94,8 @@ func TestCharsetSubnegotiation(t *testing.T) {
 	charset := &CharsetHandler{}
 	telnet.RegisterHandler(charset)
 
-	telnet.Dispatch(telnet.Context(), event.Event{Name: eventNegotation, Data: negotiation{DO, Charset}})
-	telnet.Dispatch(telnet.Context(), event.Event{Name: eventNegotation, Data: negotiation{WILL, Charset}})
+	Dispatch(telnet.Context(), event.Event{Name: eventNegotation, Data: negotiation{DO, Charset}})
+	Dispatch(telnet.Context(), event.Event{Name: eventNegotation, Data: negotiation{WILL, Charset}})
 
 	var bytesSent []byte
 
@@ -176,7 +176,7 @@ func TestCharsetSubnegotiation(t *testing.T) {
 
 	for _, test := range tests {
 		bytesSent, capturedEvent = nil, nil
-		err := telnet.Dispatch(telnet.Context(), event.Event{Name: eventSubnegotiation, Data: subnegotiation{
+		err := Dispatch(telnet.Context(), event.Event{Name: eventSubnegotiation, Data: subnegotiation{
 			opt:  Charset,
 			data: test.data,
 		}})
@@ -250,7 +250,7 @@ func TestCharsetSetsEncoding(t *testing.T) {
 		*encodable = mockEncodable{}
 		h.Register(ctx)
 		for _, event := range test.events {
-			Dispatch(ctx, event.Name, event.Data)
+			Dispatch(ctx, event)
 		}
 		require.Equal(t, test.expectedReadEnc, encodable.readEnc)
 		require.Equal(t, test.expectedWriteEnc, encodable.writeEnc)

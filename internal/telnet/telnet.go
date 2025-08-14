@@ -6,6 +6,7 @@ import (
 	"net"
 
 	"github.com/stesla/iris/internal/event"
+	"golang.org/x/text/encoding"
 )
 
 type Conn interface {
@@ -46,6 +47,16 @@ const (
 	KeyEncodable
 )
 
+func Dispatch(ctx context.Context, ev event.Event) error {
+	d := ctx.Value(KeyDispatcher).(event.Dispatcher)
+	return d.Dispatch(ctx, ev)
+}
+
+func GetOption(ctx context.Context, opt byte) OptionState {
+	options := ctx.Value(KeyOptionMap).(OptionMap)
+	return options.Get(opt)
+}
+
 func wrap(c net.Conn) *conn {
 	dispatcher := event.NewDispatcher()
 	options := NewOptionMap()
@@ -60,8 +71,7 @@ func wrap(c net.Conn) *conn {
 	cc.ctx = context.WithValue(cc.ctx, KeyEncodable, cc)
 	cc.readNoEnc = &reader{in: c, ctx: cc.ctx}
 	cc.writeNoEnc = &writer{out: c, ctx: cc.ctx}
-	cc.SetReadEncoding(ASCII)
-	cc.SetWriteEncoding(ASCII)
+	SetEncoding(cc.ctx, ASCII)
 	cc.ListenFunc(eventNegotation, cc.handleNegotiation)
 	cc.ListenFunc(eventSend, cc.handleSend)
 	return cc
@@ -101,6 +111,14 @@ func (c *conn) RegisterHandler(h Handler) func() {
 	}
 }
 
+func (c *conn) SetReadEncoding(enc encoding.Encoding) {
+	c.read = enc.NewDecoder().Reader(c.readNoEnc)
+}
+
+func (c *conn) SetWriteEncoding(enc encoding.Encoding) {
+	c.write = enc.NewEncoder().Writer(c.writeNoEnc)
+}
+
 func (c *conn) Write(p []byte) (n int, err error) {
 	return c.write.Write(p)
 }
@@ -132,8 +150,6 @@ func (r *reader) Read(p []byte) (n int, err error) {
 		n++
 	}
 
-	d := r.ctx.Value(KeyDispatcher).(event.Dispatcher)
-
 	for len(buf) > 0 {
 		switch r.ds {
 		case decodeByte:
@@ -160,10 +176,10 @@ func (r *reader) Read(p []byte) (n int, err error) {
 			case DO, DONT, WILL, WONT:
 				r.ds = decodeOptionNegotation
 			case EOR:
-				d.Dispatch(r.ctx, event.Event{Name: eventEndOfRecord})
+				Dispatch(r.ctx, event.Event{Name: eventEndOfRecord})
 				r.ds = decodeByte
 			case GA:
-				d.Dispatch(r.ctx, event.Event{Name: eventGoAhead})
+				Dispatch(r.ctx, event.Event{Name: eventGoAhead})
 				r.ds = decodeByte
 			case SB:
 				r.ds = decodeSB
@@ -175,7 +191,7 @@ func (r *reader) Read(p []byte) (n int, err error) {
 				r.ds = decodeByte
 			}
 		case decodeOptionNegotation:
-			d.Dispatch(r.ctx, event.Event{Name: eventNegotation, Data: negotiation{r.cmd, buf[0]}})
+			Dispatch(r.ctx, event.Event{Name: eventNegotation, Data: negotiation{r.cmd, buf[0]}})
 			r.ds = decodeByte
 		case decodeSB:
 			switch buf[0] {
@@ -190,7 +206,7 @@ func (r *reader) Read(p []byte) (n int, err error) {
 				r.sbdata = append(r.sbdata, IAC)
 				r.ds = decodeSB
 			case SE:
-				d.Dispatch(r.ctx, event.Event{Name: eventSubnegotiation, Data: subnegotiation{
+				Dispatch(r.ctx, event.Event{Name: eventSubnegotiation, Data: subnegotiation{
 					opt:  r.sbdata[0],
 					data: r.sbdata[1:],
 				}})
@@ -236,14 +252,10 @@ func (w *writer) Write(p []byte) (n int, err error) {
 	return
 }
 
-func (w *writer) options() OptionMap {
-	return w.ctx.Value(KeyOptionMap).(OptionMap)
-}
-
 func (w *writer) shouldSendEndOfRecord() bool {
-	return w.options().Get(EndOfRecord).EnabledForUs()
+	return GetOption(w.ctx, EndOfRecord).EnabledForUs()
 }
 
 func (w *writer) shouldSendGoAhead() bool {
-	return !w.options().Get(SuppressGoAhead).EnabledForUs()
+	return !GetOption(w.ctx, SuppressGoAhead).EnabledForUs()
 }
