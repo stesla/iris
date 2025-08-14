@@ -12,7 +12,9 @@ type Conn interface {
 	net.Conn
 	event.Dispatcher
 	Encodable
+	OptionMap
 
+	Context() context.Context
 	RegisterHandler(Handler) (unregister func())
 }
 
@@ -79,6 +81,8 @@ func (c *conn) handleSend(_ context.Context, data any) error {
 	_, err := c.Conn.Write(data.([]byte))
 	return err
 }
+
+func (c *conn) Context() context.Context { return c.ctx }
 
 func (c *conn) Read(p []byte) (n int, err error) {
 	return c.read.Read(p)

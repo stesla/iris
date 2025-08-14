@@ -2,11 +2,14 @@ package telnet
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 	"golang.org/x/text/encoding"
+	"golang.org/x/text/encoding/charmap"
+	"golang.org/x/text/encoding/unicode"
 )
 
 func TestDefaultEncodingASCII(t *testing.T) {
@@ -27,11 +30,11 @@ func TestDefaultEncodingASCII(t *testing.T) {
 func TestTransmitBinary(t *testing.T) {
 	var output bytes.Buffer
 	tcp := &mockConn{Writer: io.Discard}
-	telnet := wrap(tcp)
+	telnet := Wrap(tcp)
 
 	unregister := telnet.RegisterHandler(&TransmitBinaryHandler{})
-	telnet.Dispatch(telnet.ctx, eventNegotation, &negotiation{DO, TransmitBinary})
-	telnet.Dispatch(telnet.ctx, eventNegotation, &negotiation{WILL, TransmitBinary})
+	telnet.Dispatch(telnet.Context(), eventNegotation, &negotiation{DO, TransmitBinary})
+	telnet.Dispatch(telnet.Context(), eventNegotation, &negotiation{WILL, TransmitBinary})
 	tcp.Reader = bytes.NewReader([]byte{128, 129, 255, 255})
 	tcp.Writer = &output
 
@@ -45,10 +48,10 @@ func TestTransmitBinary(t *testing.T) {
 	require.Equal(t, []byte{IAC, IAC, 254, 253}, output.Bytes()[:n+1])
 
 	telnet.Get(SuppressGoAhead).Allow(true, true)
-	telnet.Dispatch(telnet.ctx, eventNegotation, &negotiation{DONT, TransmitBinary})
-	telnet.Dispatch(telnet.ctx, eventNegotation, &negotiation{WONT, TransmitBinary})
-	telnet.Dispatch(telnet.ctx, eventNegotation, &negotiation{DO, SuppressGoAhead})
-	telnet.Dispatch(telnet.ctx, eventNegotation, &negotiation{WILL, SuppressGoAhead})
+	telnet.Dispatch(telnet.Context(), eventNegotation, &negotiation{DONT, TransmitBinary})
+	telnet.Dispatch(telnet.Context(), eventNegotation, &negotiation{WONT, TransmitBinary})
+	telnet.Dispatch(telnet.Context(), eventNegotation, &negotiation{DO, SuppressGoAhead})
+	telnet.Dispatch(telnet.Context(), eventNegotation, &negotiation{WILL, SuppressGoAhead})
 	tcp.Reader = bytes.NewReader([]byte{128, 129, 255, 255})
 	output.Reset()
 
@@ -60,8 +63,8 @@ func TestTransmitBinary(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []byte{encoding.ASCIISub, encoding.ASCIISub, encoding.ASCIISub}, output.Bytes()[:n])
 
-	telnet.Dispatch(telnet.ctx, eventNegotation, &negotiation{DO, TransmitBinary})
-	telnet.Dispatch(telnet.ctx, eventNegotation, &negotiation{WILL, TransmitBinary})
+	telnet.Dispatch(telnet.Context(), eventNegotation, &negotiation{DO, TransmitBinary})
+	telnet.Dispatch(telnet.Context(), eventNegotation, &negotiation{WILL, TransmitBinary})
 
 	unregister()
 
@@ -74,4 +77,107 @@ func TestTransmitBinary(t *testing.T) {
 	n, err = telnet.Write([]byte{IAC, 254, 253})
 	require.NoError(t, err)
 	require.Equal(t, []byte{encoding.ASCIISub, encoding.ASCIISub, encoding.ASCIISub}, output.Bytes()[:n])
+}
+
+func TestCharsetSubnegotiation(t *testing.T) {
+	tcp := &mockConn{Writer: io.Discard}
+	telnet := Wrap(tcp)
+
+	charset := &CharsetHandler{}
+	telnet.RegisterHandler(charset)
+
+	telnet.Dispatch(telnet.Context(), eventNegotation, &negotiation{DO, Charset})
+	telnet.Dispatch(telnet.Context(), eventNegotation, &negotiation{WILL, Charset})
+
+	var bytesSent []byte
+
+	telnet.ListenFunc(eventSend, func(_ context.Context, data any) error {
+		bytesSent = data.([]byte)
+		return nil
+	})
+
+	var event any
+
+	telnet.ListenFunc(EventCharsetAccepted, func(_ context.Context, data any) error {
+		event = data
+		return nil
+	})
+
+	telnet.ListenFunc(EventCharsetRejected, func(context.Context, any) error {
+		event = EventCharsetRejected
+		return nil
+	})
+
+	tests := []struct {
+		data     []byte
+		expected []byte
+		event    any
+	}{
+		{
+			[]byte{CharsetRequest},
+			[]byte{IAC, SB, Charset, CharsetRejected, IAC, SE},
+			nil,
+		},
+		{
+			append([]byte{CharsetRequest}, ';'),
+			[]byte{IAC, SB, Charset, CharsetRejected, IAC, SE},
+			nil,
+		},
+		{
+			append([]byte{CharsetRequest}, "[TTABLE]\x01"...),
+			[]byte{IAC, SB, Charset, CharsetRejected, IAC, SE},
+			nil,
+		},
+		{
+			append([]byte{CharsetRequest}, "[TTABLE]\x01;"...),
+			[]byte{IAC, SB, Charset, CharsetRejected, IAC, SE},
+			nil,
+		},
+		{
+			append([]byte{CharsetRequest}, ";BOGUS;ENCODING;NAMES"...),
+			[]byte{IAC, SB, Charset, CharsetRejected, IAC, SE},
+			nil,
+		},
+		{
+			append([]byte{CharsetRequest}, ";US-ASCII;BOGUS"...),
+			[]byte{IAC, SB, Charset, CharsetAccepted, 'U', 'S', '-', 'A', 'S', 'C', 'I', 'I', IAC, SE},
+			CharsetData{Encoding: ASCII},
+		},
+		{
+			append([]byte{CharsetRequest}, ";UTF-8;US-ASCII"...),
+			[]byte{IAC, SB, Charset, CharsetAccepted, 'U', 'T', 'F', '-', '8', IAC, SE},
+			CharsetData{Encoding: unicode.UTF8},
+		},
+		{
+			append([]byte{CharsetRequest}, "[TTABLE]\x01;UTF-8;US-ASCII"...),
+			[]byte{IAC, SB, Charset, CharsetAccepted, 'U', 'T', 'F', '-', '8', IAC, SE},
+			CharsetData{Encoding: unicode.UTF8},
+		},
+		{
+			[]byte{CharsetRejected},
+			nil,
+			EventCharsetRejected,
+		},
+		{
+			append([]byte{CharsetAccepted}, "ISO-8859-1"...),
+			nil,
+			CharsetData{Encoding: charmap.ISO8859_1},
+		},
+		{
+			[]byte{CharsetTTableIs, 1, ';'},
+			[]byte{IAC, SB, Charset, CharsetTTableRejected, IAC, SE},
+			nil,
+		},
+	}
+
+	for _, test := range tests {
+		bytesSent, event = nil, nil
+		err := telnet.Dispatch(telnet.Context(), eventSubnegotiation, &subnegotiation{
+			opt:  Charset,
+			data: test.data,
+		})
+		require.NoError(t, err)
+		require.Equal(t, test.expected, bytesSent)
+		require.Equal(t, test.event, event)
+	}
 }
