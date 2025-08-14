@@ -46,7 +46,7 @@ func (m *optionMap) Get(opt byte) OptionState {
 }
 
 func (m *optionMap) handleNegotiation(ctx context.Context, ev event.Event) error {
-	negotiation := ev.Data.(*negotiation)
+	negotiation := ev.Data.(negotiation)
 	opt := m.m[negotiation.opt]
 	opt.receive(ctx, negotiation.cmd)
 	return nil

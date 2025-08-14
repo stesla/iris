@@ -147,7 +147,7 @@ func (h *CharsetHandler) Listen(ctx context.Context, ev event.Event) error {
 				SetEncoding(ctx, ASCII)
 			}
 		}
-	case *subnegotiation:
+	case subnegotiation:
 		switch t.opt {
 		case Charset:
 			switch cmd, data := t.data[0], t.data[1:]; cmd {

@@ -94,8 +94,8 @@ func TestCharsetSubnegotiation(t *testing.T) {
 	charset := &CharsetHandler{}
 	telnet.RegisterHandler(charset)
 
-	telnet.Dispatch(telnet.Context(), event.Event{Name: eventNegotation, Data: &negotiation{DO, Charset}})
-	telnet.Dispatch(telnet.Context(), event.Event{Name: eventNegotation, Data: &negotiation{WILL, Charset}})
+	telnet.Dispatch(telnet.Context(), event.Event{Name: eventNegotation, Data: negotiation{DO, Charset}})
+	telnet.Dispatch(telnet.Context(), event.Event{Name: eventNegotation, Data: negotiation{WILL, Charset}})
 
 	var bytesSent []byte
 
@@ -176,7 +176,7 @@ func TestCharsetSubnegotiation(t *testing.T) {
 
 	for _, test := range tests {
 		bytesSent, capturedEvent = nil, nil
-		err := telnet.Dispatch(telnet.Context(), event.Event{Name: eventSubnegotiation, Data: &subnegotiation{
+		err := telnet.Dispatch(telnet.Context(), event.Event{Name: eventSubnegotiation, Data: subnegotiation{
 			opt:  Charset,
 			data: test.data,
 		}})

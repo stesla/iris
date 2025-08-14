@@ -139,12 +139,12 @@ func TestReadCommand(t *testing.T) {
 	}{
 		{[]byte{'a', IAC, GA, 'a'}, []byte("aa"), "go ahead"},
 		{[]byte{'a', IAC, EOR, 'a'}, []byte("aa"), "end of record"},
-		{[]byte{'b', IAC, DO, Echo, 'b'}, []byte("bb"), &negotiation{DO, Echo}},
-		{[]byte{'c', IAC, DONT, Echo, 'c'}, []byte("cc"), &negotiation{DONT, Echo}},
-		{[]byte{'d', IAC, WILL, Echo, 'd'}, []byte("dd"), &negotiation{WILL, Echo}},
-		{[]byte{'e', IAC, WONT, Echo, 'e'}, []byte("ee"), &negotiation{WONT, Echo}},
-		{[]byte{'f', IAC, SB, Echo, 'f', 'o', 'o', IAC, SE, 'f'}, []byte("ff"), &subnegotiation{Echo, []byte("foo")}},
-		{[]byte{'g', IAC, SB, Echo, IAC, IAC, IAC, SE, 'g'}, []byte("gg"), &subnegotiation{Echo, []byte{IAC}}},
+		{[]byte{'b', IAC, DO, Echo, 'b'}, []byte("bb"), negotiation{DO, Echo}},
+		{[]byte{'c', IAC, DONT, Echo, 'c'}, []byte("cc"), negotiation{DONT, Echo}},
+		{[]byte{'d', IAC, WILL, Echo, 'd'}, []byte("dd"), negotiation{WILL, Echo}},
+		{[]byte{'e', IAC, WONT, Echo, 'e'}, []byte("ee"), negotiation{WONT, Echo}},
+		{[]byte{'f', IAC, SB, Echo, 'f', 'o', 'o', IAC, SE, 'f'}, []byte("ff"), subnegotiation{Echo, []byte("foo")}},
+		{[]byte{'g', IAC, SB, Echo, IAC, IAC, IAC, SE, 'g'}, []byte("gg"), subnegotiation{Echo, []byte{IAC}}},
 	}
 	for _, test := range tests {
 		var capturedEvent any

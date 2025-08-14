@@ -175,7 +175,7 @@ func (r *reader) Read(p []byte) (n int, err error) {
 				r.ds = decodeByte
 			}
 		case decodeOptionNegotation:
-			d.Dispatch(r.ctx, event.Event{Name: eventNegotation, Data: &negotiation{r.cmd, buf[0]}})
+			d.Dispatch(r.ctx, event.Event{Name: eventNegotation, Data: negotiation{r.cmd, buf[0]}})
 			r.ds = decodeByte
 		case decodeSB:
 			switch buf[0] {
@@ -190,7 +190,7 @@ func (r *reader) Read(p []byte) (n int, err error) {
 				r.sbdata = append(r.sbdata, IAC)
 				r.ds = decodeSB
 			case SE:
-				d.Dispatch(r.ctx, event.Event{Name: eventSubnegotiation, Data: &subnegotiation{
+				d.Dispatch(r.ctx, event.Event{Name: eventSubnegotiation, Data: subnegotiation{
 					opt:  r.sbdata[0],
 					data: r.sbdata[1:],
 				}})
