@@ -78,8 +78,8 @@ func (h *TransmitBinaryHandler) Unregister(ctx context.Context) {
 	SetEncoding(ctx, ASCII)
 }
 
-func (h *TransmitBinaryHandler) Listen(ctx context.Context, data any) error {
-	switch opt := data.(type) {
+func (h *TransmitBinaryHandler) Listen(ctx context.Context, ev event.Event) error {
+	switch opt := ev.Data.(type) {
 	case OptionData:
 		switch opt.OptionState.Option() {
 		case TransmitBinary:
@@ -130,8 +130,8 @@ func (h *CharsetHandler) Unregister(ctx context.Context) {
 	options.Get(Charset).Allow(false, false)
 }
 
-func (h *CharsetHandler) Listen(ctx context.Context, data any) error {
-	switch t := data.(type) {
+func (h *CharsetHandler) Listen(ctx context.Context, ev event.Event) error {
+	switch t := ev.Data.(type) {
 	case CharsetData:
 		h.enc = t.Encoding
 		opt := ctx.Value(KeyOptionMap).(OptionMap).Get(TransmitBinary)
@@ -174,7 +174,7 @@ func SetEncoding(ctx context.Context, enc encoding.Encoding) {
 
 func Dispatch(ctx context.Context, eventName event.Name, data any) {
 	d := ctx.Value(KeyDispatcher).(event.Dispatcher)
-	d.Dispatch(ctx, eventName, data)
+	d.Dispatch(ctx, event.Event{Name: eventName, Data: data})
 }
 
 func (h *CharsetHandler) handleCharsetRequest(ctx context.Context, data []byte) error {

@@ -23,7 +23,7 @@ type OptionState interface {
 type OptionMap interface {
 	Get(opt byte) OptionState
 
-	handleNegotiation(ctx context.Context, data any) error
+	handleNegotiation(ctx context.Context, ev event.Event) error
 	set(OptionState)
 }
 
@@ -45,8 +45,8 @@ func (m *optionMap) Get(opt byte) OptionState {
 	return m.m[opt]
 }
 
-func (m *optionMap) handleNegotiation(ctx context.Context, data any) error {
-	negotiation := data.(*negotiation)
+func (m *optionMap) handleNegotiation(ctx context.Context, ev event.Event) error {
+	negotiation := ev.Data.(*negotiation)
 	opt := m.m[negotiation.opt]
 	opt.receive(ctx, negotiation.cmd)
 	return nil
@@ -117,7 +117,7 @@ func (o *optionState) disable(ctx context.Context, state *qState, b byte) {
 		// ignore
 	case qYes:
 		*state = qWantNoEmpty
-		d.Dispatch(ctx, eventSend, o.sendCmd(b))
+		d.Dispatch(ctx, event.Event{Name: eventSend, Data: o.sendCmd(b)})
 	case qWantNoEmpty:
 		// ignore
 	case qWantNoOpposite:
@@ -134,7 +134,7 @@ func (o *optionState) enable(ctx context.Context, state *qState, b byte) {
 	switch *state {
 	case qNo:
 		*state = qWantYesEmpty
-		d.Dispatch(ctx, eventSend, o.sendCmd(b))
+		d.Dispatch(ctx, event.Event{Name: eventSend, Data: o.sendCmd(b)})
 	case qYes:
 		// ignore
 	case qWantNoEmpty:
@@ -173,9 +173,9 @@ func (o *optionState) receive(ctx context.Context, b byte) {
 		case qNo:
 			if *allow {
 				*state = qYes
-				d.Dispatch(ctx, eventSend, o.sendCmd(accept))
+				d.Dispatch(ctx, event.Event{Name: eventSend, Data: o.sendCmd(accept)})
 			} else {
-				d.Dispatch(ctx, eventSend, o.sendCmd(reject))
+				d.Dispatch(ctx, event.Event{Name: eventSend, Data: o.sendCmd(reject)})
 			}
 		case qYes:
 			// ignore
@@ -187,7 +187,7 @@ func (o *optionState) receive(ctx context.Context, b byte) {
 			*state = qYes
 		case qWantYesOpposite:
 			*state = qWantNoEmpty
-			d.Dispatch(ctx, eventSend, o.sendCmd(reject))
+			d.Dispatch(ctx, event.Event{Name: eventSend, Data: o.sendCmd(reject)})
 		}
 	case DONT, WONT:
 		switch *state {
@@ -195,12 +195,12 @@ func (o *optionState) receive(ctx context.Context, b byte) {
 			// ignore
 		case qYes:
 			*state = qNo
-			d.Dispatch(ctx, eventSend, o.sendCmd(reject))
+			d.Dispatch(ctx, event.Event{Name: eventSend, Data: o.sendCmd(reject)})
 		case qWantNoEmpty:
 			*state = qNo
 		case qWantNoOpposite:
 			*state = qWantYesEmpty
-			d.Dispatch(ctx, eventSend, o.sendCmd(accept))
+			d.Dispatch(ctx, event.Event{Name: eventSend, Data: o.sendCmd(accept)})
 		case qWantYesEmpty:
 			*state = qNo
 		case qWantYesOpposite:
@@ -208,11 +208,11 @@ func (o *optionState) receive(ctx context.Context, b byte) {
 		}
 	}
 	if changedThem, changedUs := themBefore != o.them, usBefore != o.us; changedThem || changedUs {
-		d.Dispatch(ctx, EventOption, OptionData{
+		d.Dispatch(ctx, event.Event{Name: EventOption, Data: OptionData{
 			OptionState: o,
 			ChangedThem: changedThem,
 			ChangedUs:   changedUs,
-		})
+		}})
 	}
 
 }

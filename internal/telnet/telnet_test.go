@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stesla/iris/internal/event"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/text/encoding"
@@ -146,19 +147,19 @@ func TestReadCommand(t *testing.T) {
 		{[]byte{'g', IAC, SB, Echo, IAC, IAC, IAC, SE, 'g'}, []byte("gg"), &subnegotiation{Echo, []byte{IAC}}},
 	}
 	for _, test := range tests {
-		var event any
-		captureEvent := func(_ context.Context, ev any) error {
-			event = ev
+		var capturedEvent any
+		captureEvent := func(_ context.Context, ev event.Event) error {
+			capturedEvent = ev.Data
 			return nil
 		}
 		tcp := &mockConn{Reader: bytes.NewReader(test.val), Writer: io.Discard}
 		telnet := wrap(tcp)
-		telnet.ListenFunc(eventEndOfRecord, func(context.Context, any) error {
-			event = "end of record"
+		telnet.ListenFunc(eventEndOfRecord, func(context.Context, event.Event) error {
+			capturedEvent = "end of record"
 			return nil
 		})
-		telnet.ListenFunc(eventGoAhead, func(context.Context, any) error {
-			event = "go ahead"
+		telnet.ListenFunc(eventGoAhead, func(context.Context, event.Event) error {
+			capturedEvent = "go ahead"
 			return nil
 		})
 		telnet.ListenFunc(eventNegotation, captureEvent)
@@ -167,7 +168,7 @@ func TestReadCommand(t *testing.T) {
 		n, err := telnet.Read(buf)
 		require.NoError(t, err)
 		assert.Equal(t, test.expected, buf[:n])
-		assert.Equal(t, test.event, event)
+		assert.Equal(t, test.event, capturedEvent)
 	}
 }
 

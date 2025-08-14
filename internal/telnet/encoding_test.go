@@ -30,14 +30,16 @@ func TestDefaultEncodingASCII(t *testing.T) {
 
 func TestTransmitBinary(t *testing.T) {
 	var output bytes.Buffer
-	tcp := &mockConn{Writer: io.Discard}
+	tcp := &mockConn{Writer: &output}
 	telnet := Wrap(tcp)
 
 	unregister := telnet.RegisterHandler(&TransmitBinaryHandler{})
-	telnet.Dispatch(telnet.Context(), eventNegotation, &negotiation{DO, TransmitBinary})
-	telnet.Dispatch(telnet.Context(), eventNegotation, &negotiation{WILL, TransmitBinary})
+	telnet.Dispatch(telnet.Context(), event.Event{
+		Name: EventOption,
+		Data: OptionData{OptionState: &optionState{opt: TransmitBinary, them: qYes, us: qYes}, ChangedThem: true, ChangedUs: true},
+	})
 	tcp.Reader = bytes.NewReader([]byte{128, 129, 255, 255})
-	tcp.Writer = &output
+	output.Reset()
 
 	buf := make([]byte, bufsize)
 	n, err := telnet.Read(buf)
@@ -48,11 +50,14 @@ func TestTransmitBinary(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []byte{IAC, IAC, 254, 253}, output.Bytes()[:n+1])
 
-	telnet.Get(SuppressGoAhead).Allow(true, true)
-	telnet.Dispatch(telnet.Context(), eventNegotation, &negotiation{DONT, TransmitBinary})
-	telnet.Dispatch(telnet.Context(), eventNegotation, &negotiation{WONT, TransmitBinary})
-	telnet.Dispatch(telnet.Context(), eventNegotation, &negotiation{DO, SuppressGoAhead})
-	telnet.Dispatch(telnet.Context(), eventNegotation, &negotiation{WILL, SuppressGoAhead})
+	telnet.Dispatch(telnet.Context(), event.Event{
+		Name: EventOption,
+		Data: OptionData{OptionState: &optionState{opt: TransmitBinary, them: qNo, us: qNo}, ChangedThem: true, ChangedUs: true},
+	})
+	telnet.Dispatch(telnet.Context(), event.Event{
+		Name: EventOption,
+		Data: OptionData{OptionState: &optionState{opt: SuppressGoAhead, them: qYes, us: qYes}, ChangedThem: true, ChangedUs: true},
+	})
 	tcp.Reader = bytes.NewReader([]byte{128, 129, 255, 255})
 	output.Reset()
 
@@ -64,8 +69,10 @@ func TestTransmitBinary(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []byte{encoding.ASCIISub, encoding.ASCIISub, encoding.ASCIISub}, output.Bytes()[:n])
 
-	telnet.Dispatch(telnet.Context(), eventNegotation, &negotiation{DO, TransmitBinary})
-	telnet.Dispatch(telnet.Context(), eventNegotation, &negotiation{WILL, TransmitBinary})
+	telnet.Dispatch(telnet.Context(), event.Event{
+		Name: EventOption,
+		Data: OptionData{OptionState: &optionState{opt: TransmitBinary, them: qYes, us: qYes}, ChangedThem: true, ChangedUs: true},
+	})
 
 	unregister()
 
@@ -87,27 +94,23 @@ func TestCharsetSubnegotiation(t *testing.T) {
 	charset := &CharsetHandler{}
 	telnet.RegisterHandler(charset)
 
-	telnet.Dispatch(telnet.Context(), eventNegotation, &negotiation{DO, Charset})
-	telnet.Dispatch(telnet.Context(), eventNegotation, &negotiation{WILL, Charset})
+	telnet.Dispatch(telnet.Context(), event.Event{Name: eventNegotation, Data: &negotiation{DO, Charset}})
+	telnet.Dispatch(telnet.Context(), event.Event{Name: eventNegotation, Data: &negotiation{WILL, Charset}})
 
 	var bytesSent []byte
 
-	telnet.ListenFunc(eventSend, func(_ context.Context, data any) error {
-		bytesSent = data.([]byte)
+	telnet.ListenFunc(eventSend, func(_ context.Context, ev event.Event) error {
+		bytesSent = ev.Data.([]byte)
 		return nil
 	})
 
-	var event any
-
-	telnet.ListenFunc(EventCharsetAccepted, func(_ context.Context, data any) error {
-		event = data
+	var capturedEvent *event.Event
+	captureEvent := func(_ context.Context, ev event.Event) error {
+		capturedEvent = &ev
 		return nil
-	})
-
-	telnet.ListenFunc(EventCharsetRejected, func(context.Context, any) error {
-		event = EventCharsetRejected
-		return nil
-	})
+	}
+	telnet.ListenFunc(EventCharsetAccepted, captureEvent)
+	telnet.ListenFunc(EventCharsetRejected, captureEvent)
 
 	tests := []struct {
 		data     []byte
@@ -142,27 +145,27 @@ func TestCharsetSubnegotiation(t *testing.T) {
 		{
 			append([]byte{CharsetRequest}, ";US-ASCII;BOGUS"...),
 			[]byte{IAC, SB, Charset, CharsetAccepted, 'U', 'S', '-', 'A', 'S', 'C', 'I', 'I', IAC, SE},
-			CharsetData{Encoding: ASCII},
+			event.Event{Name: EventCharsetAccepted, Data: CharsetData{Encoding: ASCII}},
 		},
 		{
 			append([]byte{CharsetRequest}, ";UTF-8;US-ASCII"...),
 			[]byte{IAC, SB, Charset, CharsetAccepted, 'U', 'T', 'F', '-', '8', IAC, SE},
-			CharsetData{Encoding: unicode.UTF8},
+			event.Event{Name: EventCharsetAccepted, Data: CharsetData{Encoding: unicode.UTF8}},
 		},
 		{
 			append([]byte{CharsetRequest}, "[TTABLE]\x01;UTF-8;US-ASCII"...),
 			[]byte{IAC, SB, Charset, CharsetAccepted, 'U', 'T', 'F', '-', '8', IAC, SE},
-			CharsetData{Encoding: unicode.UTF8},
+			event.Event{Name: EventCharsetAccepted, Data: CharsetData{Encoding: unicode.UTF8}},
 		},
 		{
 			[]byte{CharsetRejected},
 			nil,
-			EventCharsetRejected,
+			event.Event{Name: EventCharsetRejected},
 		},
 		{
 			append([]byte{CharsetAccepted}, "ISO-8859-1"...),
 			nil,
-			CharsetData{Encoding: charmap.ISO8859_1},
+			event.Event{Name: EventCharsetAccepted, Data: CharsetData{Encoding: charmap.ISO8859_1}},
 		},
 		{
 			[]byte{CharsetTTableIs, 1, ';'},
@@ -172,14 +175,18 @@ func TestCharsetSubnegotiation(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		bytesSent, event = nil, nil
-		err := telnet.Dispatch(telnet.Context(), eventSubnegotiation, &subnegotiation{
+		bytesSent, capturedEvent = nil, nil
+		err := telnet.Dispatch(telnet.Context(), event.Event{Name: eventSubnegotiation, Data: &subnegotiation{
 			opt:  Charset,
 			data: test.data,
-		})
+		}})
 		require.NoError(t, err)
 		require.Equal(t, test.expected, bytesSent)
-		require.Equal(t, test.event, event)
+		if test.event == nil {
+			require.Nil(t, capturedEvent)
+		} else {
+			require.Equal(t, test.event, *capturedEvent)
+		}
 	}
 }
 
@@ -195,17 +202,12 @@ func (m *mockEncodable) SetWriteEncoding(enc encoding.Encoding) {
 	m.writeEnc = enc
 }
 
-type Event struct {
-	event.Name
-	Data any
-}
-
 func TestCharsetSetsEncoding(t *testing.T) {
 	dispatcher := event.NewDispatcher()
 	options := NewOptionMap()
 	options.set(&optionState{opt: Charset, them: qYes, us: qYes})
-	dispatcher.ListenFunc(EventOption, func(_ context.Context, data any) error {
-		switch opt := data.(type) {
+	dispatcher.ListenFunc(EventOption, func(_ context.Context, ev event.Event) error {
+		switch opt := ev.Data.(type) {
 		case OptionData:
 			options.set(opt.OptionState)
 		}
@@ -217,29 +219,29 @@ func TestCharsetSetsEncoding(t *testing.T) {
 	ctx = context.WithValue(ctx, KeyOptionMap, options)
 	ctx = context.WithValue(ctx, KeyEncodable, encodable)
 	tests := []struct {
-		events                            []Event
+		events                            []event.Event
 		expectedReadEnc, expectedWriteEnc encoding.Encoding
 	}{
-		{[]Event{
-			{EventCharsetAccepted, CharsetData{Encoding: unicode.UTF8}},
+		{[]event.Event{
+			{Name: EventCharsetAccepted, Data: CharsetData{Encoding: unicode.UTF8}},
 		}, nil, nil},
-		{[]Event{
-			{EventCharsetAccepted, CharsetData{Encoding: unicode.UTF8}},
-			{EventOption, OptionData{OptionState: &optionState{opt: TransmitBinary, them: qYes, us: qYes}, ChangedThem: true, ChangedUs: true}},
+		{[]event.Event{
+			{Name: EventCharsetAccepted, Data: CharsetData{Encoding: unicode.UTF8}},
+			{Name: EventOption, Data: OptionData{OptionState: &optionState{opt: TransmitBinary, them: qYes, us: qYes}, ChangedThem: true, ChangedUs: true}},
 		}, unicode.UTF8, unicode.UTF8},
-		{[]Event{
-			{EventOption, OptionData{OptionState: &optionState{opt: TransmitBinary, them: qYes, us: qYes}, ChangedThem: true, ChangedUs: true}},
-			{EventCharsetAccepted, CharsetData{Encoding: unicode.UTF8}},
+		{[]event.Event{
+			{Name: EventOption, Data: OptionData{OptionState: &optionState{opt: TransmitBinary, them: qYes, us: qYes}, ChangedThem: true, ChangedUs: true}},
+			{Name: EventCharsetAccepted, Data: CharsetData{Encoding: unicode.UTF8}},
 		}, unicode.UTF8, unicode.UTF8},
-		{[]Event{
-			{EventOption, OptionData{OptionState: &optionState{opt: TransmitBinary, them: qYes, us: qYes}, ChangedThem: true, ChangedUs: true}},
-			{EventCharsetAccepted, CharsetData{Encoding: unicode.UTF8}},
-			{EventOption, OptionData{OptionState: &optionState{opt: TransmitBinary, them: qYes, us: qNo}, ChangedThem: false, ChangedUs: true}},
+		{[]event.Event{
+			{Name: EventOption, Data: OptionData{OptionState: &optionState{opt: TransmitBinary, them: qYes, us: qYes}, ChangedThem: true, ChangedUs: true}},
+			{Name: EventCharsetAccepted, Data: CharsetData{Encoding: unicode.UTF8}},
+			{Name: EventOption, Data: OptionData{OptionState: &optionState{opt: TransmitBinary, them: qYes, us: qNo}, ChangedThem: false, ChangedUs: true}},
 		}, ASCII, ASCII},
-		{[]Event{
-			{EventOption, OptionData{OptionState: &optionState{opt: TransmitBinary, them: qYes, us: qYes}, ChangedThem: true, ChangedUs: true}},
-			{EventCharsetAccepted, CharsetData{Encoding: unicode.UTF8}},
-			{EventOption, OptionData{OptionState: &optionState{opt: TransmitBinary, them: qNo, us: qYes}, ChangedThem: true, ChangedUs: false}},
+		{[]event.Event{
+			{Name: EventOption, Data: OptionData{OptionState: &optionState{opt: TransmitBinary, them: qYes, us: qYes}, ChangedThem: true, ChangedUs: true}},
+			{Name: EventCharsetAccepted, Data: CharsetData{Encoding: unicode.UTF8}},
+			{Name: EventOption, Data: OptionData{OptionState: &optionState{opt: TransmitBinary, them: qNo, us: qYes}, ChangedThem: true, ChangedUs: false}},
 		}, ASCII, ASCII},
 	}
 	for _, test := range tests {

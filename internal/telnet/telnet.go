@@ -78,8 +78,8 @@ const (
 	decodeOptionNegotation
 )
 
-func (c *conn) handleSend(_ context.Context, data any) error {
-	_, err := c.Conn.Write(data.([]byte))
+func (c *conn) handleSend(_ context.Context, ev event.Event) error {
+	_, err := c.Conn.Write(ev.Data.([]byte))
 	return err
 }
 
@@ -160,10 +160,10 @@ func (r *reader) Read(p []byte) (n int, err error) {
 			case DO, DONT, WILL, WONT:
 				r.ds = decodeOptionNegotation
 			case EOR:
-				d.Dispatch(r.ctx, eventEndOfRecord, nil)
+				d.Dispatch(r.ctx, event.Event{Name: eventEndOfRecord})
 				r.ds = decodeByte
 			case GA:
-				d.Dispatch(r.ctx, eventGoAhead, nil)
+				d.Dispatch(r.ctx, event.Event{Name: eventGoAhead})
 				r.ds = decodeByte
 			case SB:
 				r.ds = decodeSB
@@ -175,7 +175,7 @@ func (r *reader) Read(p []byte) (n int, err error) {
 				r.ds = decodeByte
 			}
 		case decodeOptionNegotation:
-			d.Dispatch(r.ctx, eventNegotation, &negotiation{r.cmd, buf[0]})
+			d.Dispatch(r.ctx, event.Event{Name: eventNegotation, Data: &negotiation{r.cmd, buf[0]}})
 			r.ds = decodeByte
 		case decodeSB:
 			switch buf[0] {
@@ -190,10 +190,10 @@ func (r *reader) Read(p []byte) (n int, err error) {
 				r.sbdata = append(r.sbdata, IAC)
 				r.ds = decodeSB
 			case SE:
-				d.Dispatch(r.ctx, eventSubnegotiation, &subnegotiation{
+				d.Dispatch(r.ctx, event.Event{Name: eventSubnegotiation, Data: &subnegotiation{
 					opt:  r.sbdata[0],
 					data: r.sbdata[1:],
-				})
+				}})
 				r.ds = decodeByte
 			}
 		}

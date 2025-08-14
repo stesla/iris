@@ -49,8 +49,8 @@ func TestOptionStateReceive(t *testing.T) {
 	for i, test := range tests {
 		var eventReceived any
 		d := event.NewDispatcher()
-		d.ListenFunc(eventSend, func(_ context.Context, ev any) error {
-			eventReceived = ev
+		d.ListenFunc(eventSend, func(_ context.Context, ev event.Event) error {
+			eventReceived = ev.Data
 			return nil
 		})
 		ctx := context.WithValue(context.Background(), KeyDispatcher, d)
@@ -72,8 +72,8 @@ func TestOptionStateReceive(t *testing.T) {
 func TestOptionEnableOrDisable(t *testing.T) {
 	var eventReceived any
 	d := event.NewDispatcher()
-	d.ListenFunc(eventSend, func(_ context.Context, ev any) error {
-		eventReceived = ev
+	d.ListenFunc(eventSend, func(_ context.Context, ev event.Event) error {
+		eventReceived = ev.Data
 		return nil
 	})
 	ctx := context.WithValue(context.Background(), KeyDispatcher, d)
@@ -166,8 +166,8 @@ func TestOptionEnabled(t *testing.T) {
 func TestOptionMapHandleNegotiation(t *testing.T) {
 	var actual []byte
 	d := event.NewDispatcher()
-	d.ListenFunc(eventSend, func(_ context.Context, data any) error {
-		actual = data.([]byte)
+	d.ListenFunc(eventSend, func(_ context.Context, ev event.Event) error {
+		actual = ev.Data.([]byte)
 		return nil
 	})
 	ctx := context.WithValue(context.Background(), KeyDispatcher, d)
@@ -184,7 +184,7 @@ func TestOptionMapHandleNegotiation(t *testing.T) {
 	}
 	for _, test := range tests {
 		actual = nil
-		m.handleNegotiation(ctx, &test.data)
+		m.handleNegotiation(ctx, event.Event{Name: eventNegotation, Data: &test.data})
 		require.Equal(t, test.expected, actual)
 	}
 }
@@ -192,8 +192,8 @@ func TestOptionMapHandleNegotiation(t *testing.T) {
 func TestOptionEvent(t *testing.T) {
 	var actual OptionData
 	d := event.NewDispatcher()
-	d.ListenFunc(EventOption, func(_ context.Context, data any) error {
-		actual = data.(OptionData)
+	d.ListenFunc(EventOption, func(_ context.Context, ev event.Event) error {
+		actual = ev.Data.(OptionData)
 		return nil
 	})
 	ctx := context.WithValue(context.Background(), KeyDispatcher, d)
