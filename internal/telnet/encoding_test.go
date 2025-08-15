@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"golang.org/x/text/encoding"
 	"golang.org/x/text/encoding/charmap"
-	eunicode "golang.org/x/text/encoding/unicode"
+	unicoding "golang.org/x/text/encoding/unicode"
 )
 
 func TestDefaultEncodingASCII(t *testing.T) {
@@ -99,6 +99,10 @@ func TestTransmitBinary(t *testing.T) {
 	require.Equal(t, 0, n)
 }
 
+func (h *CharsetHandler) reset() {
+	*h = CharsetHandler{ctx: h.ctx}
+}
+
 func TestCharsetSubnegotiation(t *testing.T) {
 	options := NewOptionMap()
 	options.set(&optionState{opt: Charset, them: qYes, us: qYes})
@@ -108,7 +112,7 @@ func TestCharsetSubnegotiation(t *testing.T) {
 	ctx = context.WithValue(ctx, KeyDispatcher, dispatcher)
 	ctx = context.WithValue(ctx, KeyOptionMap, options)
 
-	charset := &CharsetHandler{}
+	var charset CharsetHandler
 	charset.Register(ctx)
 
 	var bytesSent []byte
@@ -130,65 +134,94 @@ func TestCharsetSubnegotiation(t *testing.T) {
 		data     []byte
 		expected []byte
 		event    any
+		init     func()
+		assert   func()
 	}{
 		{
-			[]byte{CharsetRequest},
-			[]byte{IAC, SB, Charset, CharsetRejected, IAC, SE},
-			nil,
+			data:     []byte{CharsetRequest},
+			expected: []byte{IAC, SB, Charset, CharsetRejected, IAC, SE},
 		},
 		{
-			append([]byte{CharsetRequest}, ';'),
-			[]byte{IAC, SB, Charset, CharsetRejected, IAC, SE},
-			nil,
+			data:     append([]byte{CharsetRequest}, ';'),
+			expected: []byte{IAC, SB, Charset, CharsetRejected, IAC, SE},
 		},
 		{
-			append([]byte{CharsetRequest}, "[TTABLE]\x01"...),
-			[]byte{IAC, SB, Charset, CharsetRejected, IAC, SE},
-			nil,
+			data:     append([]byte{CharsetRequest}, "[TTABLE]\x01"...),
+			expected: []byte{IAC, SB, Charset, CharsetRejected, IAC, SE},
 		},
 		{
-			append([]byte{CharsetRequest}, "[TTABLE]\x01;"...),
-			[]byte{IAC, SB, Charset, CharsetRejected, IAC, SE},
-			nil,
+			data:     append([]byte{CharsetRequest}, "[TTABLE]\x01;"...),
+			expected: []byte{IAC, SB, Charset, CharsetRejected, IAC, SE},
 		},
 		{
-			append([]byte{CharsetRequest}, ";BOGUS;ENCODING;NAMES"...),
-			[]byte{IAC, SB, Charset, CharsetRejected, IAC, SE},
-			nil,
+			data:     append([]byte{CharsetRequest}, ";BOGUS;ENCODING;NAMES"...),
+			expected: []byte{IAC, SB, Charset, CharsetRejected, IAC, SE},
 		},
 		{
-			append([]byte{CharsetRequest}, ";US-ASCII;BOGUS"...),
-			[]byte{IAC, SB, Charset, CharsetAccepted, 'U', 'S', '-', 'A', 'S', 'C', 'I', 'I', IAC, SE},
-			event.Event{Name: EventCharsetAccepted, Data: CharsetData{Encoding: ASCII}},
+			data:     append([]byte{CharsetRequest}, ";US-ASCII;BOGUS"...),
+			expected: []byte{IAC, SB, Charset, CharsetAccepted, 'U', 'S', '-', 'A', 'S', 'C', 'I', 'I', IAC, SE},
+			event:    event.Event{Name: EventCharsetAccepted, Data: CharsetData{Encoding: ASCII}},
 		},
 		{
-			append([]byte{CharsetRequest}, ";UTF-8;US-ASCII"...),
-			[]byte{IAC, SB, Charset, CharsetAccepted, 'U', 'T', 'F', '-', '8', IAC, SE},
-			event.Event{Name: EventCharsetAccepted, Data: CharsetData{Encoding: eunicode.UTF8}},
+			data:     append([]byte{CharsetRequest}, ";UTF-8;US-ASCII"...),
+			expected: []byte{IAC, SB, Charset, CharsetAccepted, 'U', 'T', 'F', '-', '8', IAC, SE},
+			event:    event.Event{Name: EventCharsetAccepted, Data: CharsetData{Encoding: unicoding.UTF8}},
 		},
 		{
-			append([]byte{CharsetRequest}, "[TTABLE]\x01;UTF-8;US-ASCII"...),
-			[]byte{IAC, SB, Charset, CharsetAccepted, 'U', 'T', 'F', '-', '8', IAC, SE},
-			event.Event{Name: EventCharsetAccepted, Data: CharsetData{Encoding: eunicode.UTF8}},
+			data:     append([]byte{CharsetRequest}, "[TTABLE]\x01;UTF-8;US-ASCII"...),
+			expected: []byte{IAC, SB, Charset, CharsetAccepted, 'U', 'T', 'F', '-', '8', IAC, SE},
+			event:    event.Event{Name: EventCharsetAccepted, Data: CharsetData{Encoding: unicoding.UTF8}},
 		},
 		{
-			[]byte{CharsetRejected},
-			nil,
-			event.Event{Name: EventCharsetRejected},
+			init: func() {
+				charset.RequestEncoding(unicoding.UTF8)
+			},
+			data:  []byte{CharsetRejected},
+			event: event.Event{Name: EventCharsetRejected},
+			assert: func() {
+				require.Nil(t, charset.requestedEncodings)
+			},
 		},
 		{
-			append([]byte{CharsetAccepted}, "ISO-8859-1"...),
-			nil,
-			event.Event{Name: EventCharsetAccepted, Data: CharsetData{Encoding: charmap.ISO8859_1}},
+			init: func() {
+				charset.RequestEncoding(unicoding.UTF8)
+			},
+			data:  append([]byte{CharsetAccepted}, "ISO-8859-1"...),
+			event: event.Event{Name: EventCharsetAccepted, Data: CharsetData{Encoding: charmap.ISO8859_1}},
+			assert: func() {
+				require.Nil(t, charset.requestedEncodings)
+			},
 		},
 		{
-			[]byte{CharsetTTableIs, 1, ';'},
-			[]byte{IAC, SB, Charset, CharsetTTableRejected, IAC, SE},
-			nil,
+			data:     []byte{CharsetTTableIs, 1, ';'},
+			expected: []byte{IAC, SB, Charset, CharsetTTableRejected, IAC, SE},
+		},
+		{
+			init: func() {
+				charset.IsServer = true
+				charset.RequestEncoding(unicoding.UTF8)
+			},
+			data:     append([]byte{CharsetRequest}, ";UTF-8;US-ASCII"...),
+			expected: []byte{IAC, SB, Charset, CharsetRejected, IAC, SE},
+		},
+		{
+			init: func() {
+				charset.RequestEncoding(unicoding.UTF8)
+			},
+			data:     append([]byte{CharsetRequest}, ";UTF-8;US-ASCII"...),
+			expected: []byte{IAC, SB, Charset, CharsetAccepted, 'U', 'T', 'F', '-', '8', IAC, SE},
+			event:    event.Event{Name: EventCharsetAccepted, Data: CharsetData{Encoding: unicoding.UTF8}},
+			assert: func() {
+				require.Nil(t, charset.requestedEncodings)
+			},
 		},
 	}
 
-	for _, test := range tests {
+	for i, test := range tests {
+		charset.reset()
+		if test.init != nil {
+			test.init()
+		}
 		bytesSent, capturedEvent = nil, nil
 		err := Dispatch(ctx, event.Event{Name: EventSubnegotiation, Data: Subnegotiation{
 			Opt:  Charset,
@@ -197,9 +230,12 @@ func TestCharsetSubnegotiation(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, test.expected, bytesSent)
 		if test.event == nil {
-			require.Nil(t, capturedEvent)
+			require.Nil(t, capturedEvent, i)
 		} else {
 			require.Equal(t, test.event, *capturedEvent)
+		}
+		if test.assert != nil {
+			test.assert()
 		}
 	}
 }
@@ -237,24 +273,24 @@ func TestCharsetSetsEncoding(t *testing.T) {
 		expectedReadEnc, expectedWriteEnc encoding.Encoding
 	}{
 		{[]event.Event{
-			{Name: EventCharsetAccepted, Data: CharsetData{Encoding: eunicode.UTF8}},
+			{Name: EventCharsetAccepted, Data: CharsetData{Encoding: unicoding.UTF8}},
 		}, nil, nil},
 		{[]event.Event{
-			{Name: EventCharsetAccepted, Data: CharsetData{Encoding: eunicode.UTF8}},
+			{Name: EventCharsetAccepted, Data: CharsetData{Encoding: unicoding.UTF8}},
 			{Name: EventOption, Data: OptionData{OptionState: &optionState{opt: TransmitBinary, them: qYes, us: qYes}, ChangedThem: true, ChangedUs: true}},
-		}, eunicode.UTF8, eunicode.UTF8},
+		}, unicoding.UTF8, unicoding.UTF8},
 		{[]event.Event{
 			{Name: EventOption, Data: OptionData{OptionState: &optionState{opt: TransmitBinary, them: qYes, us: qYes}, ChangedThem: true, ChangedUs: true}},
-			{Name: EventCharsetAccepted, Data: CharsetData{Encoding: eunicode.UTF8}},
-		}, eunicode.UTF8, eunicode.UTF8},
+			{Name: EventCharsetAccepted, Data: CharsetData{Encoding: unicoding.UTF8}},
+		}, unicoding.UTF8, unicoding.UTF8},
 		{[]event.Event{
 			{Name: EventOption, Data: OptionData{OptionState: &optionState{opt: TransmitBinary, them: qYes, us: qYes}, ChangedThem: true, ChangedUs: true}},
-			{Name: EventCharsetAccepted, Data: CharsetData{Encoding: eunicode.UTF8}},
+			{Name: EventCharsetAccepted, Data: CharsetData{Encoding: unicoding.UTF8}},
 			{Name: EventOption, Data: OptionData{OptionState: &optionState{opt: TransmitBinary, them: qYes, us: qNo}, ChangedThem: false, ChangedUs: true}},
 		}, ASCII, ASCII},
 		{[]event.Event{
 			{Name: EventOption, Data: OptionData{OptionState: &optionState{opt: TransmitBinary, them: qYes, us: qYes}, ChangedThem: true, ChangedUs: true}},
-			{Name: EventCharsetAccepted, Data: CharsetData{Encoding: eunicode.UTF8}},
+			{Name: EventCharsetAccepted, Data: CharsetData{Encoding: unicoding.UTF8}},
 			{Name: EventOption, Data: OptionData{OptionState: &optionState{opt: TransmitBinary, them: qNo, us: qYes}, ChangedThem: true, ChangedUs: false}},
 		}, ASCII, ASCII},
 	}
@@ -286,7 +322,7 @@ func TestCharsetRequestEncoding(t *testing.T) {
 
 	handler := &CharsetHandler{}
 	handler.Register(ctx)
-	err := handler.RequestEncoding(eunicode.UTF8, charmap.ISO8859_1, charmap.Windows1252, ASCII)
+	err := handler.RequestEncoding(unicoding.UTF8, charmap.ISO8859_1, charmap.Windows1252, ASCII)
 	require.NoError(t, err)
 	expected := []byte{IAC, SB, Charset, CharsetRequest}
 	expected = append(expected, ";UTF-8"...)

@@ -73,8 +73,11 @@ func (h *TransmitBinaryHandler) Listen(ctx context.Context, ev event.Event) erro
 }
 
 type CharsetHandler struct {
-	ctx context.Context
-	enc encoding.Encoding
+	IsServer bool
+
+	ctx                context.Context
+	enc                encoding.Encoding
+	requestedEncodings []encoding.Encoding
 }
 
 func (h *CharsetHandler) Register(ctx context.Context) {
@@ -102,6 +105,7 @@ func (h *CharsetHandler) RequestEncoding(encodings ...encoding.Encoding) error {
 		output = append(output, ";"+name...)
 	}
 	output = append(output, IAC, SE)
+	h.requestedEncodings = encodings
 	return Dispatch(h.ctx, event.Event{Name: EventSend, Data: output})
 }
 
@@ -138,9 +142,11 @@ func (h *CharsetHandler) Listen(ctx context.Context, ev event.Event) error {
 			if GetOption(ctx, Charset).EnabledForUs() {
 				switch cmd, data := t.Data[0], t.Data[1:]; cmd {
 				case CharsetAccepted:
+					h.requestedEncodings = nil
 					enc := h.getEncoding(data)
 					Dispatch(ctx, event.Event{Name: EventCharsetAccepted, Data: CharsetData{Encoding: enc}})
 				case CharsetRejected:
+					h.requestedEncodings = nil
 					Dispatch(ctx, event.Event{Name: EventCharsetRejected})
 				case CharsetRequest:
 					return h.handleCharsetRequest(ctx, data)
@@ -154,8 +160,19 @@ func (h *CharsetHandler) Listen(ctx context.Context, ev event.Event) error {
 }
 
 func (h *CharsetHandler) handleCharsetRequest(ctx context.Context, data []byte) error {
+	reject := func() error {
+		return Dispatch(ctx, event.Event{Name: EventSend, Data: []byte{IAC, SB, Charset, CharsetRejected, IAC, SE}})
+	}
+
 	var charset []byte
 	var enc encoding.Encoding
+
+	if len(h.requestedEncodings) > 0 {
+		if h.IsServer {
+			return reject()
+		}
+		h.requestedEncodings = nil
+	}
 
 	const ttable = "[TTABLE]"
 	if len(data) > 10 && bytes.HasPrefix(data, []byte(ttable)) {
@@ -171,7 +188,7 @@ func (h *CharsetHandler) handleCharsetRequest(ctx context.Context, data []byte) 
 	}
 
 	if enc == nil {
-		Dispatch(ctx, event.Event{Name: EventSend, Data: []byte{IAC, SB, Charset, CharsetRejected, IAC, SE}})
+		reject()
 	} else {
 		out := []byte{IAC, SB, Charset, CharsetAccepted}
 		out = append(out, charset...)
