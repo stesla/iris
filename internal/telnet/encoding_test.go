@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"context"
 	"testing"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/stesla/iris/internal/event"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/text/encoding"
 	"golang.org/x/text/encoding/charmap"
-	"golang.org/x/text/encoding/unicode"
+	eunicode "golang.org/x/text/encoding/unicode"
 )
 
 func TestDefaultEncodingASCII(t *testing.T) {
@@ -17,14 +19,19 @@ func TestDefaultEncodingASCII(t *testing.T) {
 	tcp := &mockConn{Reader: bytes.NewBuffer([]byte{IAC, IAC, 128, 129}), Writer: &output}
 	telnet := Wrap(tcp)
 
+	expected := make([]byte, 9)
+	utf8.EncodeRune(expected, unicode.ReplacementChar)
+	utf8.EncodeRune(expected[3:], unicode.ReplacementChar)
+	utf8.EncodeRune(expected[6:], unicode.ReplacementChar)
+
 	buf := make([]byte, bufsize)
 	n, err := telnet.Read(buf)
 	require.NoError(t, err)
-	require.Equal(t, []byte{encoding.ASCIISub, encoding.ASCIISub, encoding.ASCIISub}, buf[:n])
+	require.Equal(t, expected, buf[:n])
 
 	n, err = telnet.Write([]byte{IAC, 128, 129})
-	require.NoError(t, err)
-	require.Equal(t, []byte{encoding.ASCIISub, encoding.ASCIISub, encoding.ASCIISub}, output.Bytes()[:n])
+	require.ErrorContains(t, err, "rune not supported")
+	require.Equal(t, 0, n)
 }
 
 func TestTransmitBinary(t *testing.T) {
@@ -61,13 +68,18 @@ func TestTransmitBinary(t *testing.T) {
 	tcp.Reader = bytes.NewReader([]byte{128, 129, 255, 255})
 	output.Reset()
 
+	expected := make([]byte, 9)
+	utf8.EncodeRune(expected, unicode.ReplacementChar)
+	utf8.EncodeRune(expected[3:], unicode.ReplacementChar)
+	utf8.EncodeRune(expected[6:], unicode.ReplacementChar)
+
 	n, err = telnet.Read(buf)
 	require.NoError(t, err)
-	require.Equal(t, []byte{encoding.ASCIISub, encoding.ASCIISub, encoding.ASCIISub}, buf[:n])
+	require.Equal(t, expected, buf[:n])
 
 	n, err = telnet.Write([]byte{IAC, 254, 253})
-	require.NoError(t, err)
-	require.Equal(t, []byte{encoding.ASCIISub, encoding.ASCIISub, encoding.ASCIISub}, output.Bytes()[:n])
+	require.ErrorContains(t, err, "rune not supported")
+	require.Equal(t, 0, n)
 
 	Dispatch(telnet.Context(), event.Event{
 		Name: EventOption,
@@ -79,12 +91,12 @@ func TestTransmitBinary(t *testing.T) {
 	tcp.Reader = bytes.NewReader([]byte{128, 129, 255, 255})
 	n, err = telnet.Read(buf)
 	require.NoError(t, err)
-	require.Equal(t, []byte{encoding.ASCIISub, encoding.ASCIISub, encoding.ASCIISub}, buf[:n])
+	require.Equal(t, expected, buf[:n])
 
 	output.Reset()
 	n, err = telnet.Write([]byte{IAC, 254, 253})
-	require.NoError(t, err)
-	require.Equal(t, []byte{encoding.ASCIISub, encoding.ASCIISub, encoding.ASCIISub}, output.Bytes()[:n])
+	require.ErrorContains(t, err, "rune not supported")
+	require.Equal(t, 0, n)
 }
 
 func TestCharsetSubnegotiation(t *testing.T) {
@@ -152,12 +164,12 @@ func TestCharsetSubnegotiation(t *testing.T) {
 		{
 			append([]byte{CharsetRequest}, ";UTF-8;US-ASCII"...),
 			[]byte{IAC, SB, Charset, CharsetAccepted, 'U', 'T', 'F', '-', '8', IAC, SE},
-			event.Event{Name: EventCharsetAccepted, Data: CharsetData{Encoding: unicode.UTF8}},
+			event.Event{Name: EventCharsetAccepted, Data: CharsetData{Encoding: eunicode.UTF8}},
 		},
 		{
 			append([]byte{CharsetRequest}, "[TTABLE]\x01;UTF-8;US-ASCII"...),
 			[]byte{IAC, SB, Charset, CharsetAccepted, 'U', 'T', 'F', '-', '8', IAC, SE},
-			event.Event{Name: EventCharsetAccepted, Data: CharsetData{Encoding: unicode.UTF8}},
+			event.Event{Name: EventCharsetAccepted, Data: CharsetData{Encoding: eunicode.UTF8}},
 		},
 		{
 			[]byte{CharsetRejected},
@@ -225,24 +237,24 @@ func TestCharsetSetsEncoding(t *testing.T) {
 		expectedReadEnc, expectedWriteEnc encoding.Encoding
 	}{
 		{[]event.Event{
-			{Name: EventCharsetAccepted, Data: CharsetData{Encoding: unicode.UTF8}},
+			{Name: EventCharsetAccepted, Data: CharsetData{Encoding: eunicode.UTF8}},
 		}, nil, nil},
 		{[]event.Event{
-			{Name: EventCharsetAccepted, Data: CharsetData{Encoding: unicode.UTF8}},
+			{Name: EventCharsetAccepted, Data: CharsetData{Encoding: eunicode.UTF8}},
 			{Name: EventOption, Data: OptionData{OptionState: &optionState{opt: TransmitBinary, them: qYes, us: qYes}, ChangedThem: true, ChangedUs: true}},
-		}, unicode.UTF8, unicode.UTF8},
+		}, eunicode.UTF8, eunicode.UTF8},
 		{[]event.Event{
 			{Name: EventOption, Data: OptionData{OptionState: &optionState{opt: TransmitBinary, them: qYes, us: qYes}, ChangedThem: true, ChangedUs: true}},
-			{Name: EventCharsetAccepted, Data: CharsetData{Encoding: unicode.UTF8}},
-		}, unicode.UTF8, unicode.UTF8},
+			{Name: EventCharsetAccepted, Data: CharsetData{Encoding: eunicode.UTF8}},
+		}, eunicode.UTF8, eunicode.UTF8},
 		{[]event.Event{
 			{Name: EventOption, Data: OptionData{OptionState: &optionState{opt: TransmitBinary, them: qYes, us: qYes}, ChangedThem: true, ChangedUs: true}},
-			{Name: EventCharsetAccepted, Data: CharsetData{Encoding: unicode.UTF8}},
+			{Name: EventCharsetAccepted, Data: CharsetData{Encoding: eunicode.UTF8}},
 			{Name: EventOption, Data: OptionData{OptionState: &optionState{opt: TransmitBinary, them: qYes, us: qNo}, ChangedThem: false, ChangedUs: true}},
 		}, ASCII, ASCII},
 		{[]event.Event{
 			{Name: EventOption, Data: OptionData{OptionState: &optionState{opt: TransmitBinary, them: qYes, us: qYes}, ChangedThem: true, ChangedUs: true}},
-			{Name: EventCharsetAccepted, Data: CharsetData{Encoding: unicode.UTF8}},
+			{Name: EventCharsetAccepted, Data: CharsetData{Encoding: eunicode.UTF8}},
 			{Name: EventOption, Data: OptionData{OptionState: &optionState{opt: TransmitBinary, them: qNo, us: qYes}, ChangedThem: true, ChangedUs: false}},
 		}, ASCII, ASCII},
 	}
@@ -257,4 +269,30 @@ func TestCharsetSetsEncoding(t *testing.T) {
 		require.Equal(t, test.expectedReadEnc, encodable.readEnc)
 		require.Equal(t, test.expectedWriteEnc, encodable.writeEnc)
 	}
+}
+
+func TestCharsetRequestEncoding(t *testing.T) {
+	var sentData []byte
+	dispatcher := event.NewDispatcher()
+	dispatcher.ListenFunc(EventSend, func(_ context.Context, ev event.Event) error {
+		sentData = ev.Data.([]byte)
+		return nil
+	})
+	options := NewOptionMap()
+	options.set(&optionState{opt: Charset, them: qYes, us: qYes})
+	ctx := context.Background()
+	ctx = context.WithValue(ctx, KeyDispatcher, dispatcher)
+	ctx = context.WithValue(ctx, KeyOptionMap, options)
+
+	handler := &CharsetHandler{}
+	handler.Register(ctx)
+	err := handler.RequestEncoding(eunicode.UTF8, charmap.ISO8859_1, charmap.Windows1252, ASCII)
+	require.NoError(t, err)
+	expected := []byte{IAC, SB, Charset, CharsetRequest}
+	expected = append(expected, ";UTF-8"...)
+	expected = append(expected, ";ISO_8859-1:1987"...)
+	expected = append(expected, ";windows-1252"...)
+	expected = append(expected, ";US-ASCII"...)
+	expected = append(expected, IAC, SE)
+	require.Equal(t, expected, sentData)
 }

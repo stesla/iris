@@ -3,11 +3,11 @@ package telnet
 import (
 	"bytes"
 	"context"
+	"errors"
 
 	"github.com/stesla/iris/internal/event"
 	"golang.org/x/text/encoding"
 	"golang.org/x/text/encoding/ianaindex"
-	"golang.org/x/text/transform"
 )
 
 type Encodable interface {
@@ -20,39 +20,6 @@ func SetEncoding(ctx context.Context, enc encoding.Encoding) {
 	encodable.SetReadEncoding(enc)
 	encodable.SetWriteEncoding(enc)
 }
-
-var ASCII encoding.Encoding = &asciiEncoding{}
-
-type asciiEncoding struct{}
-
-func (a asciiEncoding) NewDecoder() *encoding.Decoder {
-	return &encoding.Decoder{Transformer: a}
-}
-
-func (a asciiEncoding) NewEncoder() *encoding.Encoder {
-	return &encoding.Encoder{Transformer: a}
-}
-
-func (asciiEncoding) String() string { return "ASCII" }
-
-func (a asciiEncoding) Transform(dst, src []byte, atEOF bool) (nDst, nSrc int, err error) {
-	for i, c := range src {
-		if nDst >= len(dst) {
-			err = transform.ErrShortDst
-			break
-		}
-		if c < 128 {
-			dst[nDst] = c
-		} else {
-			dst[nDst] = '\x1A'
-		}
-		nDst++
-		nSrc = i + 1
-	}
-	return
-}
-
-func (a asciiEncoding) Reset() {}
 
 type TransmitBinaryHandler struct {
 	ctx context.Context
@@ -120,6 +87,22 @@ func (h *CharsetHandler) Register(ctx context.Context) {
 	d.Listen(EventSubnegotiation, h)
 	d.Listen(EventCharsetAccepted, h)
 	d.Listen(EventCharsetRejected, h)
+}
+
+func (h *CharsetHandler) RequestEncoding(encodings ...encoding.Encoding) error {
+	if !GetOption(h.ctx, Charset).EnabledForUs() {
+		return errors.New("charset option not enabled")
+	}
+	output := []byte{IAC, SB, Charset, CharsetRequest}
+	for _, enc := range encodings {
+		name, err := ianaindex.IANA.Name(enc)
+		if err != nil {
+			return err
+		}
+		output = append(output, ";"+name...)
+	}
+	output = append(output, IAC, SE)
+	return Dispatch(h.ctx, event.Event{Name: EventSend, Data: output})
 }
 
 func (h *CharsetHandler) Unregister() {
@@ -217,4 +200,10 @@ func (*CharsetHandler) getEncoding(name []byte) encoding.Encoding {
 		enc, _ := ianaindex.IANA.Encoding(s)
 		return enc
 	}
+}
+
+var ASCII encoding.Encoding
+
+func init() {
+	ASCII, _ = ianaindex.IANA.Encoding("US-ASCII")
 }
