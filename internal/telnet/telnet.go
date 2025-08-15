@@ -72,8 +72,8 @@ func wrap(c net.Conn) *conn {
 	cc.readNoEnc = &reader{in: c, ctx: cc.ctx}
 	cc.writeNoEnc = &writer{out: c, ctx: cc.ctx}
 	SetEncoding(cc.ctx, ASCII)
-	cc.ListenFunc(eventNegotation, cc.handleNegotiation)
-	cc.ListenFunc(eventSend, cc.handleSend)
+	cc.ListenFunc(EventNegotation, cc.handleNegotiation)
+	cc.ListenFunc(EventSend, cc.handleSend)
 	return cc
 }
 
@@ -176,10 +176,10 @@ func (r *reader) Read(p []byte) (n int, err error) {
 			case DO, DONT, WILL, WONT:
 				r.ds = decodeOptionNegotation
 			case EOR:
-				Dispatch(r.ctx, event.Event{Name: eventEndOfRecord})
+				Dispatch(r.ctx, event.Event{Name: EventEndOfRecord})
 				r.ds = decodeByte
 			case GA:
-				Dispatch(r.ctx, event.Event{Name: eventGoAhead})
+				Dispatch(r.ctx, event.Event{Name: EventGoAhead})
 				r.ds = decodeByte
 			case SB:
 				r.ds = decodeSB
@@ -191,7 +191,7 @@ func (r *reader) Read(p []byte) (n int, err error) {
 				r.ds = decodeByte
 			}
 		case decodeOptionNegotation:
-			Dispatch(r.ctx, event.Event{Name: eventNegotation, Data: negotiation{r.cmd, buf[0]}})
+			Dispatch(r.ctx, event.Event{Name: EventNegotation, Data: Negotiation{Cmd: r.cmd, Opt: buf[0]}})
 			r.ds = decodeByte
 		case decodeSB:
 			switch buf[0] {
@@ -206,9 +206,9 @@ func (r *reader) Read(p []byte) (n int, err error) {
 				r.sbdata = append(r.sbdata, IAC)
 				r.ds = decodeSB
 			case SE:
-				Dispatch(r.ctx, event.Event{Name: eventSubnegotiation, Data: subnegotiation{
-					opt:  r.sbdata[0],
-					data: r.sbdata[1:],
+				Dispatch(r.ctx, event.Event{Name: EventSubnegotiation, Data: Subnegotiation{
+					Opt:  r.sbdata[0],
+					Data: r.sbdata[1:],
 				}})
 				r.ds = decodeByte
 			}

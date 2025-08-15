@@ -5,7 +5,12 @@ import (
 	"golang.org/x/text/encoding"
 )
 
-const EventOption event.Name = "telnet.event.option"
+const EventSend event.Name = "telnet.send-data"
+
+const EventEndOfRecord event.Name = "telnet.end-of-record"
+const EventGoAhead event.Name = "telnet.go-ahead"
+
+const EventOption event.Name = "telnet.option"
 
 type OptionData struct {
 	OptionState
@@ -13,28 +18,23 @@ type OptionData struct {
 	ChangedUs   bool
 }
 
-const EventCharsetAccepted event.Name = "telnet.event.charset.accepted"
+const EventNegotation event.Name = "telnet.reader.negotiation"
+
+type Negotiation struct {
+	Opt byte
+	Cmd byte
+}
+
+const EventSubnegotiation event.Name = "telnet.reader.subnegotiation"
+
+type Subnegotiation struct {
+	Opt  byte
+	Data []byte
+}
+
+const EventCharsetAccepted event.Name = "telnet.charset.accepted"
+const EventCharsetRejected event.Name = "telnet.charset.rejected"
 
 type CharsetData struct {
 	encoding.Encoding
-}
-
-const EventCharsetRejected event.Name = "telnet.event.charset.rejected"
-
-const eventEndOfRecord event.Name = "internal.end-of-record"
-const eventGoAhead event.Name = "internal.go-ahead"
-const eventSend event.Name = "internal.send-data"
-
-const eventNegotation event.Name = "internal.option.negotiation"
-
-type negotiation struct {
-	cmd byte
-	opt byte
-}
-
-const eventSubnegotiation event.Name = "internal.option.subnegotiation"
-
-type subnegotiation struct {
-	opt  byte
-	data []byte
 }

@@ -49,7 +49,7 @@ func TestOptionStateReceive(t *testing.T) {
 	for i, test := range tests {
 		var eventReceived any
 		d := event.NewDispatcher()
-		d.ListenFunc(eventSend, func(_ context.Context, ev event.Event) error {
+		d.ListenFunc(EventSend, func(_ context.Context, ev event.Event) error {
 			eventReceived = ev.Data
 			return nil
 		})
@@ -72,7 +72,7 @@ func TestOptionStateReceive(t *testing.T) {
 func TestOptionEnableOrDisable(t *testing.T) {
 	var eventReceived any
 	d := event.NewDispatcher()
-	d.ListenFunc(eventSend, func(_ context.Context, ev event.Event) error {
+	d.ListenFunc(EventSend, func(_ context.Context, ev event.Event) error {
 		eventReceived = ev.Data
 		return nil
 	})
@@ -166,7 +166,7 @@ func TestOptionEnabled(t *testing.T) {
 func TestOptionMapHandleNegotiation(t *testing.T) {
 	var actual []byte
 	d := event.NewDispatcher()
-	d.ListenFunc(eventSend, func(_ context.Context, ev event.Event) error {
+	d.ListenFunc(EventSend, func(_ context.Context, ev event.Event) error {
 		actual = ev.Data.([]byte)
 		return nil
 	})
@@ -174,17 +174,17 @@ func TestOptionMapHandleNegotiation(t *testing.T) {
 	m := NewOptionMap()
 	m.Get(Echo).Allow(true, true)
 	var tests = []struct {
-		data     negotiation
+		data     Negotiation
 		expected []byte
 	}{
-		{negotiation{DO, Echo}, []byte{IAC, WILL, Echo}},
-		{negotiation{WILL, Echo}, []byte{IAC, DO, Echo}},
-		{negotiation{DO, SuppressGoAhead}, []byte{IAC, WONT, SuppressGoAhead}},
-		{negotiation{WILL, SuppressGoAhead}, []byte{IAC, DONT, SuppressGoAhead}},
+		{Negotiation{Cmd: DO, Opt: Echo}, []byte{IAC, WILL, Echo}},
+		{Negotiation{Cmd: WILL, Opt: Echo}, []byte{IAC, DO, Echo}},
+		{Negotiation{Cmd: DO, Opt: SuppressGoAhead}, []byte{IAC, WONT, SuppressGoAhead}},
+		{Negotiation{Cmd: WILL, Opt: SuppressGoAhead}, []byte{IAC, DONT, SuppressGoAhead}},
 	}
 	for _, test := range tests {
 		actual = nil
-		m.handleNegotiation(ctx, event.Event{Name: eventNegotation, Data: test.data})
+		m.handleNegotiation(ctx, event.Event{Name: EventNegotation, Data: test.data})
 		require.Equal(t, test.expected, actual)
 	}
 }

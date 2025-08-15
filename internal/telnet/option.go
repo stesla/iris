@@ -46,9 +46,9 @@ func (m *optionMap) Get(opt byte) OptionState {
 }
 
 func (m *optionMap) handleNegotiation(ctx context.Context, ev event.Event) error {
-	negotiation := ev.Data.(negotiation)
-	opt := m.m[negotiation.opt]
-	opt.receive(ctx, negotiation.cmd)
+	negotiation := ev.Data.(Negotiation)
+	opt := m.m[negotiation.Opt]
+	opt.receive(ctx, negotiation.Cmd)
 	return nil
 }
 
@@ -116,7 +116,7 @@ func (o *optionState) disable(ctx context.Context, state *qState, b byte) {
 		// ignore
 	case qYes:
 		*state = qWantNoEmpty
-		Dispatch(ctx, event.Event{Name: eventSend, Data: o.sendCmd(b)})
+		Dispatch(ctx, event.Event{Name: EventSend, Data: o.sendCmd(b)})
 	case qWantNoEmpty:
 		// ignore
 	case qWantNoOpposite:
@@ -132,7 +132,7 @@ func (o *optionState) enable(ctx context.Context, state *qState, b byte) {
 	switch *state {
 	case qNo:
 		*state = qWantYesEmpty
-		Dispatch(ctx, event.Event{Name: eventSend, Data: o.sendCmd(b)})
+		Dispatch(ctx, event.Event{Name: EventSend, Data: o.sendCmd(b)})
 	case qYes:
 		// ignore
 	case qWantNoEmpty:
@@ -170,9 +170,9 @@ func (o *optionState) receive(ctx context.Context, b byte) {
 		case qNo:
 			if *allow {
 				*state = qYes
-				Dispatch(ctx, event.Event{Name: eventSend, Data: o.sendCmd(accept)})
+				Dispatch(ctx, event.Event{Name: EventSend, Data: o.sendCmd(accept)})
 			} else {
-				Dispatch(ctx, event.Event{Name: eventSend, Data: o.sendCmd(reject)})
+				Dispatch(ctx, event.Event{Name: EventSend, Data: o.sendCmd(reject)})
 			}
 		case qYes:
 			// ignore
@@ -184,7 +184,7 @@ func (o *optionState) receive(ctx context.Context, b byte) {
 			*state = qYes
 		case qWantYesOpposite:
 			*state = qWantNoEmpty
-			Dispatch(ctx, event.Event{Name: eventSend, Data: o.sendCmd(reject)})
+			Dispatch(ctx, event.Event{Name: EventSend, Data: o.sendCmd(reject)})
 		}
 	case DONT, WONT:
 		switch *state {
@@ -192,12 +192,12 @@ func (o *optionState) receive(ctx context.Context, b byte) {
 			// ignore
 		case qYes:
 			*state = qNo
-			Dispatch(ctx, event.Event{Name: eventSend, Data: o.sendCmd(reject)})
+			Dispatch(ctx, event.Event{Name: EventSend, Data: o.sendCmd(reject)})
 		case qWantNoEmpty:
 			*state = qNo
 		case qWantNoOpposite:
 			*state = qWantYesEmpty
-			Dispatch(ctx, event.Event{Name: eventSend, Data: o.sendCmd(accept)})
+			Dispatch(ctx, event.Event{Name: EventSend, Data: o.sendCmd(accept)})
 		case qWantYesEmpty:
 			*state = qNo
 		case qWantYesOpposite:

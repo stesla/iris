@@ -139,12 +139,12 @@ func TestReadCommand(t *testing.T) {
 	}{
 		{[]byte{'a', IAC, GA, 'a'}, []byte("aa"), "go ahead"},
 		{[]byte{'a', IAC, EOR, 'a'}, []byte("aa"), "end of record"},
-		{[]byte{'b', IAC, DO, Echo, 'b'}, []byte("bb"), negotiation{DO, Echo}},
-		{[]byte{'c', IAC, DONT, Echo, 'c'}, []byte("cc"), negotiation{DONT, Echo}},
-		{[]byte{'d', IAC, WILL, Echo, 'd'}, []byte("dd"), negotiation{WILL, Echo}},
-		{[]byte{'e', IAC, WONT, Echo, 'e'}, []byte("ee"), negotiation{WONT, Echo}},
-		{[]byte{'f', IAC, SB, Echo, 'f', 'o', 'o', IAC, SE, 'f'}, []byte("ff"), subnegotiation{Echo, []byte("foo")}},
-		{[]byte{'g', IAC, SB, Echo, IAC, IAC, IAC, SE, 'g'}, []byte("gg"), subnegotiation{Echo, []byte{IAC}}},
+		{[]byte{'b', IAC, DO, Echo, 'b'}, []byte("bb"), Negotiation{Cmd: DO, Opt: Echo}},
+		{[]byte{'c', IAC, DONT, Echo, 'c'}, []byte("cc"), Negotiation{Cmd: DONT, Opt: Echo}},
+		{[]byte{'d', IAC, WILL, Echo, 'd'}, []byte("dd"), Negotiation{Cmd: WILL, Opt: Echo}},
+		{[]byte{'e', IAC, WONT, Echo, 'e'}, []byte("ee"), Negotiation{Cmd: WONT, Opt: Echo}},
+		{[]byte{'f', IAC, SB, Echo, 'f', 'o', 'o', IAC, SE, 'f'}, []byte("ff"), Subnegotiation{Opt: Echo, Data: []byte("foo")}},
+		{[]byte{'g', IAC, SB, Echo, IAC, IAC, IAC, SE, 'g'}, []byte("gg"), Subnegotiation{Opt: Echo, Data: []byte{IAC}}},
 	}
 	for _, test := range tests {
 		var capturedEvent any
@@ -154,16 +154,16 @@ func TestReadCommand(t *testing.T) {
 		}
 		tcp := &mockConn{Reader: bytes.NewReader(test.val), Writer: io.Discard}
 		telnet := wrap(tcp)
-		telnet.ListenFunc(eventEndOfRecord, func(context.Context, event.Event) error {
+		telnet.ListenFunc(EventEndOfRecord, func(context.Context, event.Event) error {
 			capturedEvent = "end of record"
 			return nil
 		})
-		telnet.ListenFunc(eventGoAhead, func(context.Context, event.Event) error {
+		telnet.ListenFunc(EventGoAhead, func(context.Context, event.Event) error {
 			capturedEvent = "go ahead"
 			return nil
 		})
-		telnet.ListenFunc(eventNegotation, captureEvent)
-		telnet.ListenFunc(eventSubnegotiation, captureEvent)
+		telnet.ListenFunc(EventNegotation, captureEvent)
+		telnet.ListenFunc(EventSubnegotiation, captureEvent)
 		buf := make([]byte, bufsize)
 		n, err := telnet.Read(buf)
 		require.NoError(t, err)

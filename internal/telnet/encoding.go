@@ -110,7 +110,7 @@ func (h *CharsetHandler) Register(ctx context.Context) {
 
 	d := ctx.Value(KeyDispatcher).(event.Dispatcher)
 	d.Listen(EventOption, h)
-	d.Listen(eventSubnegotiation, h)
+	d.Listen(EventSubnegotiation, h)
 	d.Listen(EventCharsetAccepted, h)
 	d.Listen(EventCharsetRejected, h)
 }
@@ -121,7 +121,7 @@ func (h *CharsetHandler) Unregister(ctx context.Context) {
 	d := ctx.Value(KeyDispatcher).(event.Dispatcher)
 	d.RemoveListener(EventCharsetRejected, h)
 	d.RemoveListener(EventCharsetAccepted, h)
-	d.RemoveListener(eventSubnegotiation, h)
+	d.RemoveListener(EventSubnegotiation, h)
 	d.RemoveListener(EventOption, h)
 }
 
@@ -142,10 +142,10 @@ func (h *CharsetHandler) Listen(ctx context.Context, ev event.Event) error {
 				SetEncoding(ctx, ASCII)
 			}
 		}
-	case subnegotiation:
-		switch t.opt {
+	case Subnegotiation:
+		switch t.Opt {
 		case Charset:
-			switch cmd, data := t.data[0], t.data[1:]; cmd {
+			switch cmd, data := t.Data[0], t.Data[1:]; cmd {
 			case CharsetAccepted:
 				enc := h.getEncoding(data)
 				Dispatch(ctx, event.Event{Name: EventCharsetAccepted, Data: CharsetData{Encoding: enc}})
@@ -154,7 +154,7 @@ func (h *CharsetHandler) Listen(ctx context.Context, ev event.Event) error {
 			case CharsetRequest:
 				return h.handleCharsetRequest(ctx, data)
 			case CharsetTTableIs:
-				Dispatch(ctx, event.Event{Name: eventSend, Data: []byte{IAC, SB, Charset, CharsetTTableRejected, IAC, SE}})
+				Dispatch(ctx, event.Event{Name: EventSend, Data: []byte{IAC, SB, Charset, CharsetTTableRejected, IAC, SE}})
 			}
 		}
 	}
@@ -179,12 +179,12 @@ func (h *CharsetHandler) handleCharsetRequest(ctx context.Context, data []byte) 
 	}
 
 	if enc == nil {
-		Dispatch(ctx, event.Event{Name: eventSend, Data: []byte{IAC, SB, Charset, CharsetRejected, IAC, SE}})
+		Dispatch(ctx, event.Event{Name: EventSend, Data: []byte{IAC, SB, Charset, CharsetRejected, IAC, SE}})
 	} else {
 		out := []byte{IAC, SB, Charset, CharsetAccepted}
 		out = append(out, charset...)
 		out = append(out, IAC, SE)
-		Dispatch(ctx, event.Event{Name: eventSend, Data: out})
+		Dispatch(ctx, event.Event{Name: EventSend, Data: out})
 		Dispatch(ctx, event.Event{Name: EventCharsetAccepted, Data: CharsetData{Encoding: enc}})
 	}
 	return nil
