@@ -31,7 +31,7 @@ const bufsize = 16
 
 func TestReadIntoEmptySlice(t *testing.T) {
 	var in bytes.Buffer
-	telnet := Wrap(&mockConn{Reader: &in})
+	telnet := Wrap(context.Background(), &mockConn{Reader: &in})
 	buf := []byte{}
 	n, err := telnet.Read(buf)
 	require.Equal(t, 0, n)
@@ -62,7 +62,7 @@ func TestRead(t *testing.T) {
 	}
 	for _, test := range tests {
 		tcp := &mockConn{}
-		telnet := Wrap(tcp)
+		telnet := Wrap(context.Background(), tcp)
 		telnet.SetReadEncoding(encoding.Nop)
 		buf := make([]byte, bufsize)
 		n := 0
@@ -90,7 +90,7 @@ func (r boomReader) Read(b []byte) (n int, err error) {
 
 func TestReadWithUnderlyingError(t *testing.T) {
 	tcp := &mockConn{Reader: boomReader{3, errors.New("boom")}}
-	telnet := Wrap(tcp)
+	telnet := Wrap(context.Background(), tcp)
 	buf := make([]byte, bufsize)
 	n, err := telnet.Read(buf)
 	require.Error(t, err, "boom")
@@ -100,7 +100,7 @@ func TestReadWithUnderlyingError(t *testing.T) {
 
 func TestEOFWaitsForNextRead(t *testing.T) {
 	tcp := &mockConn{Reader: boomReader{3, io.EOF}}
-	telnet := Wrap(tcp)
+	telnet := Wrap(context.Background(), tcp)
 	buf := make([]byte, bufsize)
 	n, err := telnet.Read(buf)
 	require.NoError(t, err)
@@ -123,7 +123,7 @@ func TestWrite(t *testing.T) {
 	for _, test := range tests {
 		var buf bytes.Buffer
 		tcp := &mockConn{Writer: &buf}
-		telnet := Wrap(tcp)
+		telnet := Wrap(context.Background(), tcp)
 		telnet.SetWriteEncoding(encoding.Nop)
 		n, err := telnet.Write(test.val)
 		require.NoError(t, err)
@@ -153,7 +153,7 @@ func TestReadCommand(t *testing.T) {
 			return nil
 		}
 		tcp := &mockConn{Reader: bytes.NewReader(test.val), Writer: io.Discard}
-		telnet := wrap(tcp)
+		telnet := wrap(context.Background(), tcp)
 		telnet.dispatcher.ListenFunc(EventEndOfRecord, func(context.Context, event.Event) error {
 			capturedEvent = "end of record"
 			return nil
@@ -175,7 +175,7 @@ func TestReadCommand(t *testing.T) {
 func TestSuppressGoAhead(t *testing.T) {
 	var output bytes.Buffer
 	tcp := &mockConn{Writer: &output}
-	telnet := wrap(tcp)
+	telnet := wrap(context.Background(), tcp)
 	telnet.options.set(&optionState{opt: SuppressGoAhead, us: qYes})
 	_, err := telnet.Write([]byte("xyzzy"))
 	require.NoError(t, err)
@@ -185,7 +185,7 @@ func TestSuppressGoAhead(t *testing.T) {
 func TestEndOfRecord(t *testing.T) {
 	var output bytes.Buffer
 	tcp := &mockConn{Writer: &output}
-	telnet := wrap(tcp)
+	telnet := wrap(context.Background(), tcp)
 	telnet.options.set(&optionState{opt: EndOfRecord, us: qYes})
 	telnet.options.set(&optionState{opt: SuppressGoAhead, us: qYes})
 	_, err := telnet.Write([]byte("foo"))

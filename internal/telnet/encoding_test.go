@@ -17,7 +17,7 @@ import (
 func TestDefaultEncodingASCII(t *testing.T) {
 	var output bytes.Buffer
 	tcp := &mockConn{Reader: bytes.NewBuffer([]byte{IAC, IAC, 128, 129}), Writer: &output}
-	telnet := Wrap(tcp)
+	telnet := Wrap(context.Background(), tcp)
 
 	expected := make([]byte, 9)
 	utf8.EncodeRune(expected, unicode.ReplacementChar)
@@ -37,7 +37,7 @@ func TestDefaultEncodingASCII(t *testing.T) {
 func TestTransmitBinary(t *testing.T) {
 	var output bytes.Buffer
 	tcp := &mockConn{Writer: &output}
-	telnet := Wrap(tcp)
+	telnet := Wrap(context.Background(), tcp)
 
 	handler := &TransmitBinaryHandler{}
 	telnet.RegisterHandler(handler)

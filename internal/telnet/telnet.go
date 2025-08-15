@@ -26,13 +26,8 @@ type conn struct {
 	writeNoEnc, write io.Writer
 }
 
-func Dial(address string) (Conn, error) {
-	tcpconn, err := net.Dial("tcp", address)
-	return Wrap(tcpconn), err
-}
-
-func Wrap(c net.Conn) Conn {
-	return wrap(c)
+func Wrap(ctx context.Context, c net.Conn) Conn {
+	return wrap(ctx, c)
 }
 
 type contextKey int
@@ -53,14 +48,14 @@ func GetOption(ctx context.Context, opt byte) OptionState {
 	return options.Get(opt)
 }
 
-func wrap(c net.Conn) *conn {
+func wrap(ctx context.Context, c net.Conn) *conn {
 	dispatcher := event.NewDispatcher()
 	options := NewOptionMap()
 	cc := &conn{
 		Conn:       c,
 		dispatcher: dispatcher,
 		options:    options,
-		ctx:        context.Background(),
+		ctx:        ctx,
 	}
 	cc.ctx = context.WithValue(cc.ctx, KeyDispatcher, dispatcher)
 	cc.ctx = context.WithValue(cc.ctx, KeyOptionMap, options)
