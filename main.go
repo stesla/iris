@@ -3,14 +3,12 @@ package main
 import (
 	"context"
 	"flag"
-	"io"
 	"net"
 	"os"
 
 	"github.com/rs/zerolog"
 	"github.com/stesla/iris/internal/event"
 	"github.com/stesla/iris/internal/telnet"
-	"golang.org/x/text/encoding/unicode"
 )
 
 var (
@@ -37,10 +35,36 @@ func main() {
 
 		conn := telnet.Wrap(ctx, tcp)
 
+		logEvent := func(_ context.Context, ev event.Event) error {
+			log := logger.Trace().Str("event", string(ev.Name))
+			switch t := ev.Data.(type) {
+			case []byte:
+				log.Bytes("data", t)
+			case telnet.OptionData:
+				log.Uint8("option", t.Option()).
+					Bool("changedThem", t.ChangedThem).
+					Bool("changedUs", t.ChangedUs).
+					Bool("enabledThem", t.EnabledForThem()).
+					Bool("enabledUs", t.EnabledForUs())
+			case telnet.Subnegotiation:
+				log.Uint8("option", t.Opt).Bytes("data", t.Data)
+			default:
+				log.Any("data", t)
+			}
+			log.Send()
+			return nil
+		}
+		conn.ListenFunc(telnet.EventNegotation, logEvent)
+		conn.ListenFunc(telnet.EventOption, logEvent)
+		conn.ListenFunc(telnet.EventSubnegotiation, logEvent)
+		conn.ListenFunc(telnet.EventSend, logEvent)
+		conn.ListenFunc(telnet.EventCharsetAccepted, logEvent)
+		conn.ListenFunc(telnet.EventCharsetRejected, logEvent)
+
 		go func() {
 			defer conn.Close()
 			logger.Debug().Str("peer", conn.RemoteAddr().String()).Msg("connected")
-			session := newSession(conn, logger)
+			session := newSession(conn)
 			session.runForever()
 			logger.Debug().Str("peer", conn.RemoteAddr().String()).Msg("disconnected")
 		}()
@@ -52,44 +76,4 @@ func getEnvDefault(name, defaultValue string) string {
 		return value
 	}
 	return defaultValue
-}
-
-type session struct {
-	telnet.Conn
-
-	logger zerolog.Logger
-
-	charset        telnet.CharsetHandler
-	transmitBinary telnet.TransmitBinaryHandler
-}
-
-func newSession(conn telnet.Conn, logger zerolog.Logger) *session {
-	result := &session{
-		Conn:    conn,
-		logger:  logger,
-		charset: telnet.CharsetHandler{IsServer: true},
-	}
-	conn.RegisterHandler(&result.transmitBinary)
-	conn.RegisterHandler(&result.charset)
-	conn.ListenFunc(telnet.EventOption, func(ctx context.Context, ev event.Event) error {
-		switch opt := ev.Data.(type) {
-		case telnet.OptionData:
-			switch opt.Option() {
-			case telnet.Charset:
-				if opt.ChangedUs && opt.EnabledForUs() {
-					result.charset.RequestEncoding(unicode.UTF8)
-				}
-			}
-		}
-		return nil
-	})
-	return result
-}
-
-func (s *session) runForever() {
-	s.GetOption(telnet.SuppressGoAhead).Allow(true, true).EnableBoth(s.Context())
-	s.GetOption(telnet.EndOfRecord).Allow(true, true).EnableBoth(s.Context())
-	s.GetOption(telnet.TransmitBinary).Allow(true, true).EnableBoth(s.Context())
-	s.GetOption(telnet.Charset).Allow(true, true).EnableBoth(s.Context())
-	io.Copy(s, s)
 }
