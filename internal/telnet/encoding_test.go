@@ -3,7 +3,6 @@ package telnet
 import (
 	"bytes"
 	"context"
-	"io"
 	"testing"
 
 	"github.com/stesla/iris/internal/event"
@@ -88,18 +87,20 @@ func TestTransmitBinary(t *testing.T) {
 }
 
 func TestCharsetSubnegotiation(t *testing.T) {
-	tcp := &mockConn{Writer: io.Discard}
-	telnet := Wrap(tcp)
+	options := NewOptionMap()
+	options.set(&optionState{opt: Charset, them: qYes, us: qYes})
+	dispatcher := event.NewDispatcher()
+	dispatcher.ListenFunc(EventNegotation, options.handleNegotiation)
+	ctx := context.Background()
+	ctx = context.WithValue(ctx, KeyDispatcher, dispatcher)
+	ctx = context.WithValue(ctx, KeyOptionMap, options)
 
 	charset := &CharsetHandler{}
-	telnet.RegisterHandler(charset)
-
-	Dispatch(telnet.Context(), event.Event{Name: EventNegotation, Data: Negotiation{DO, Charset}})
-	Dispatch(telnet.Context(), event.Event{Name: EventNegotation, Data: Negotiation{WILL, Charset}})
+	charset.Register(ctx)
 
 	var bytesSent []byte
 
-	telnet.ListenFunc(EventSend, func(_ context.Context, ev event.Event) error {
+	dispatcher.ListenFunc(EventSend, func(_ context.Context, ev event.Event) error {
 		bytesSent = ev.Data.([]byte)
 		return nil
 	})
@@ -109,8 +110,8 @@ func TestCharsetSubnegotiation(t *testing.T) {
 		capturedEvent = &ev
 		return nil
 	}
-	telnet.ListenFunc(EventCharsetAccepted, captureEvent)
-	telnet.ListenFunc(EventCharsetRejected, captureEvent)
+	dispatcher.ListenFunc(EventCharsetAccepted, captureEvent)
+	dispatcher.ListenFunc(EventCharsetRejected, captureEvent)
 
 	tests := []struct {
 		data     []byte
@@ -176,7 +177,7 @@ func TestCharsetSubnegotiation(t *testing.T) {
 
 	for _, test := range tests {
 		bytesSent, capturedEvent = nil, nil
-		err := Dispatch(telnet.Context(), event.Event{Name: EventSubnegotiation, Data: Subnegotiation{
+		err := Dispatch(ctx, event.Event{Name: EventSubnegotiation, Data: Subnegotiation{
 			Opt:  Charset,
 			Data: test.data,
 		}})

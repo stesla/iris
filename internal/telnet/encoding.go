@@ -145,16 +145,18 @@ func (h *CharsetHandler) Listen(ctx context.Context, ev event.Event) error {
 	case Subnegotiation:
 		switch t.Opt {
 		case Charset:
-			switch cmd, data := t.Data[0], t.Data[1:]; cmd {
-			case CharsetAccepted:
-				enc := h.getEncoding(data)
-				Dispatch(ctx, event.Event{Name: EventCharsetAccepted, Data: CharsetData{Encoding: enc}})
-			case CharsetRejected:
-				Dispatch(ctx, event.Event{Name: EventCharsetRejected})
-			case CharsetRequest:
-				return h.handleCharsetRequest(ctx, data)
-			case CharsetTTableIs:
-				Dispatch(ctx, event.Event{Name: EventSend, Data: []byte{IAC, SB, Charset, CharsetTTableRejected, IAC, SE}})
+			if GetOption(ctx, Charset).EnabledForUs() {
+				switch cmd, data := t.Data[0], t.Data[1:]; cmd {
+				case CharsetAccepted:
+					enc := h.getEncoding(data)
+					Dispatch(ctx, event.Event{Name: EventCharsetAccepted, Data: CharsetData{Encoding: enc}})
+				case CharsetRejected:
+					Dispatch(ctx, event.Event{Name: EventCharsetRejected})
+				case CharsetRequest:
+					return h.handleCharsetRequest(ctx, data)
+				case CharsetTTableIs:
+					Dispatch(ctx, event.Event{Name: EventSend, Data: []byte{IAC, SB, Charset, CharsetTTableRejected, IAC, SE}})
+				}
 			}
 		}
 	}
