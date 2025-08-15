@@ -41,7 +41,7 @@ func TestTransmitBinary(t *testing.T) {
 
 	handler := &TransmitBinaryHandler{}
 	telnet.RegisterHandler(handler)
-	Dispatch(telnet.Context(), event.Event{
+	dispatch(telnet.Context(), event.Event{
 		Name: EventOption,
 		Data: OptionData{OptionState: &optionState{opt: TransmitBinary, them: qYes, us: qYes}, ChangedThem: true, ChangedUs: true},
 	})
@@ -57,11 +57,11 @@ func TestTransmitBinary(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []byte{IAC, IAC, 254, 253}, output.Bytes()[:n+1])
 
-	Dispatch(telnet.Context(), event.Event{
+	dispatch(telnet.Context(), event.Event{
 		Name: EventOption,
 		Data: OptionData{OptionState: &optionState{opt: TransmitBinary, them: qNo, us: qNo}, ChangedThem: true, ChangedUs: true},
 	})
-	Dispatch(telnet.Context(), event.Event{
+	dispatch(telnet.Context(), event.Event{
 		Name: EventOption,
 		Data: OptionData{OptionState: &optionState{opt: SuppressGoAhead, them: qYes, us: qYes}, ChangedThem: true, ChangedUs: true},
 	})
@@ -81,7 +81,7 @@ func TestTransmitBinary(t *testing.T) {
 	require.ErrorContains(t, err, "rune not supported")
 	require.Equal(t, 0, n)
 
-	Dispatch(telnet.Context(), event.Event{
+	dispatch(telnet.Context(), event.Event{
 		Name: EventOption,
 		Data: OptionData{OptionState: &optionState{opt: TransmitBinary, them: qYes, us: qYes}, ChangedThem: true, ChangedUs: true},
 	})
@@ -223,7 +223,7 @@ func TestCharsetSubnegotiation(t *testing.T) {
 			test.init()
 		}
 		bytesSent, capturedEvent = nil, nil
-		err := Dispatch(ctx, event.Event{Name: EventSubnegotiation, Data: Subnegotiation{
+		err := dispatch(ctx, event.Event{Name: EventSubnegotiation, Data: Subnegotiation{
 			Opt:  Charset,
 			Data: test.data,
 		}})
@@ -300,7 +300,7 @@ func TestCharsetSetsEncoding(t *testing.T) {
 		*encodable = mockEncodable{}
 		h.Register(ctx)
 		for _, event := range test.events {
-			Dispatch(ctx, event)
+			dispatch(ctx, event)
 		}
 		require.Equal(t, test.expectedReadEnc, encodable.readEnc)
 		require.Equal(t, test.expectedWriteEnc, encodable.writeEnc)

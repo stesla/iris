@@ -38,12 +38,12 @@ const (
 	KeyEncodable
 )
 
-func Dispatch(ctx context.Context, ev event.Event) error {
+func dispatch(ctx context.Context, ev event.Event) error {
 	d := ctx.Value(KeyDispatcher).(event.Dispatcher)
 	return d.Dispatch(ctx, ev)
 }
 
-func GetOption(ctx context.Context, opt byte) OptionState {
+func getOption(ctx context.Context, opt byte) OptionState {
 	options := ctx.Value(KeyOptionMap).(OptionMap)
 	return options.Get(opt)
 }
@@ -62,7 +62,7 @@ func wrap(ctx context.Context, c net.Conn) *conn {
 	cc.ctx = context.WithValue(cc.ctx, KeyEncodable, cc)
 	cc.readNoEnc = &reader{in: c, ctx: cc.ctx}
 	cc.writeNoEnc = &writer{out: c, ctx: cc.ctx}
-	SetEncoding(cc.ctx, ASCII)
+	setEncoding(cc.ctx, ASCII)
 	dispatcher.Listen(EventNegotation, options)
 	dispatcher.ListenFunc(EventSend, cc.handleSend)
 	return cc
@@ -164,10 +164,10 @@ func (r *reader) Read(p []byte) (n int, err error) {
 			case DO, DONT, WILL, WONT:
 				r.ds = decodeOptionNegotation
 			case EOR:
-				Dispatch(r.ctx, event.Event{Name: EventEndOfRecord})
+				dispatch(r.ctx, event.Event{Name: EventEndOfRecord})
 				r.ds = decodeByte
 			case GA:
-				Dispatch(r.ctx, event.Event{Name: EventGoAhead})
+				dispatch(r.ctx, event.Event{Name: EventGoAhead})
 				r.ds = decodeByte
 			case SB:
 				r.ds = decodeSB
@@ -179,7 +179,7 @@ func (r *reader) Read(p []byte) (n int, err error) {
 				r.ds = decodeByte
 			}
 		case decodeOptionNegotation:
-			Dispatch(r.ctx, event.Event{Name: EventNegotation, Data: Negotiation{Cmd: r.cmd, Opt: buf[0]}})
+			dispatch(r.ctx, event.Event{Name: EventNegotation, Data: Negotiation{Cmd: r.cmd, Opt: buf[0]}})
 			r.ds = decodeByte
 		case decodeSB:
 			switch buf[0] {
@@ -194,7 +194,7 @@ func (r *reader) Read(p []byte) (n int, err error) {
 				r.sbdata = append(r.sbdata, IAC)
 				r.ds = decodeSB
 			case SE:
-				Dispatch(r.ctx, event.Event{Name: EventSubnegotiation, Data: Subnegotiation{
+				dispatch(r.ctx, event.Event{Name: EventSubnegotiation, Data: Subnegotiation{
 					Opt:  r.sbdata[0],
 					Data: r.sbdata[1:],
 				}})
@@ -241,9 +241,9 @@ func (w *writer) Write(p []byte) (n int, err error) {
 }
 
 func (w *writer) shouldSendEndOfRecord() bool {
-	return GetOption(w.ctx, EndOfRecord).EnabledForUs()
+	return getOption(w.ctx, EndOfRecord).EnabledForUs()
 }
 
 func (w *writer) shouldSendGoAhead() bool {
-	return !GetOption(w.ctx, SuppressGoAhead).EnabledForUs()
+	return !getOption(w.ctx, SuppressGoAhead).EnabledForUs()
 }

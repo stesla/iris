@@ -15,7 +15,7 @@ type Encodable interface {
 	SetWriteEncoding(encoding.Encoding)
 }
 
-func SetEncoding(ctx context.Context, enc encoding.Encoding) {
+func setEncoding(ctx context.Context, enc encoding.Encoding) {
 	encodable := ctx.Value(KeyEncodable).(Encodable)
 	encodable.SetReadEncoding(enc)
 	encodable.SetWriteEncoding(enc)
@@ -28,7 +28,7 @@ type TransmitBinaryHandler struct {
 func (h *TransmitBinaryHandler) Register(ctx context.Context) {
 	h.ctx = ctx
 
-	GetOption(ctx, TransmitBinary).Allow(true, true)
+	getOption(ctx, TransmitBinary).Allow(true, true)
 
 	d := ctx.Value(KeyDispatcher).(event.Dispatcher)
 	d.Listen(EventOption, h)
@@ -38,12 +38,12 @@ func (h *TransmitBinaryHandler) Unregister() {
 	d := h.ctx.Value(KeyDispatcher).(event.Dispatcher)
 	d.RemoveListener(EventOption, h)
 
-	opt := GetOption(h.ctx, TransmitBinary)
+	opt := getOption(h.ctx, TransmitBinary)
 	opt.Allow(false, false)
 	opt.DisableForThem(h.ctx)
 	opt.DisableForUs(h.ctx)
 
-	SetEncoding(h.ctx, ASCII)
+	setEncoding(h.ctx, ASCII)
 }
 
 func (h *TransmitBinaryHandler) Listen(ctx context.Context, ev event.Event) error {
@@ -83,7 +83,7 @@ type CharsetHandler struct {
 func (h *CharsetHandler) Register(ctx context.Context) {
 	h.ctx = ctx
 
-	GetOption(ctx, Charset).Allow(true, true)
+	getOption(ctx, Charset).Allow(true, true)
 
 	d := ctx.Value(KeyDispatcher).(event.Dispatcher)
 	d.Listen(EventOption, h)
@@ -93,7 +93,7 @@ func (h *CharsetHandler) Register(ctx context.Context) {
 }
 
 func (h *CharsetHandler) RequestEncoding(encodings ...encoding.Encoding) error {
-	if !GetOption(h.ctx, Charset).EnabledForUs() {
+	if !getOption(h.ctx, Charset).EnabledForUs() {
 		return errors.New("charset option not enabled")
 	}
 	output := []byte{IAC, SB, Charset, CharsetRequest}
@@ -106,11 +106,11 @@ func (h *CharsetHandler) RequestEncoding(encodings ...encoding.Encoding) error {
 	}
 	output = append(output, IAC, SE)
 	h.requestedEncodings = encodings
-	return Dispatch(h.ctx, event.Event{Name: EventSend, Data: output})
+	return dispatch(h.ctx, event.Event{Name: EventSend, Data: output})
 }
 
 func (h *CharsetHandler) Unregister() {
-	GetOption(h.ctx, Charset).Allow(false, false)
+	getOption(h.ctx, Charset).Allow(false, false)
 
 	d := h.ctx.Value(KeyDispatcher).(event.Dispatcher)
 	d.RemoveListener(EventCharsetRejected, h)
@@ -123,35 +123,35 @@ func (h *CharsetHandler) Listen(ctx context.Context, ev event.Event) error {
 	switch t := ev.Data.(type) {
 	case CharsetData:
 		h.enc = t.Encoding
-		opt := GetOption(ctx, TransmitBinary)
+		opt := getOption(ctx, TransmitBinary)
 		if them, us := opt.EnabledForThem(), opt.EnabledForUs(); them && us {
-			SetEncoding(ctx, h.enc)
+			setEncoding(ctx, h.enc)
 		}
 	case OptionData:
 		switch t.Option() {
 		case TransmitBinary:
 			if them, us := t.EnabledForThem(), t.EnabledForUs(); them && us {
-				SetEncoding(ctx, h.enc)
+				setEncoding(ctx, h.enc)
 			} else {
-				SetEncoding(ctx, ASCII)
+				setEncoding(ctx, ASCII)
 			}
 		}
 	case Subnegotiation:
 		switch t.Opt {
 		case Charset:
-			if GetOption(ctx, Charset).EnabledForUs() {
+			if getOption(ctx, Charset).EnabledForUs() {
 				switch cmd, data := t.Data[0], t.Data[1:]; cmd {
 				case CharsetAccepted:
 					h.requestedEncodings = nil
 					enc := h.getEncoding(data)
-					Dispatch(ctx, event.Event{Name: EventCharsetAccepted, Data: CharsetData{Encoding: enc}})
+					dispatch(ctx, event.Event{Name: EventCharsetAccepted, Data: CharsetData{Encoding: enc}})
 				case CharsetRejected:
 					h.requestedEncodings = nil
-					Dispatch(ctx, event.Event{Name: EventCharsetRejected})
+					dispatch(ctx, event.Event{Name: EventCharsetRejected})
 				case CharsetRequest:
 					return h.handleCharsetRequest(ctx, data)
 				case CharsetTTableIs:
-					Dispatch(ctx, event.Event{Name: EventSend, Data: []byte{IAC, SB, Charset, CharsetTTableRejected, IAC, SE}})
+					dispatch(ctx, event.Event{Name: EventSend, Data: []byte{IAC, SB, Charset, CharsetTTableRejected, IAC, SE}})
 				}
 			}
 		}
@@ -161,7 +161,7 @@ func (h *CharsetHandler) Listen(ctx context.Context, ev event.Event) error {
 
 func (h *CharsetHandler) handleCharsetRequest(ctx context.Context, data []byte) error {
 	reject := func() error {
-		return Dispatch(ctx, event.Event{Name: EventSend, Data: []byte{IAC, SB, Charset, CharsetRejected, IAC, SE}})
+		return dispatch(ctx, event.Event{Name: EventSend, Data: []byte{IAC, SB, Charset, CharsetRejected, IAC, SE}})
 	}
 
 	var charset []byte
@@ -193,8 +193,8 @@ func (h *CharsetHandler) handleCharsetRequest(ctx context.Context, data []byte) 
 		out := []byte{IAC, SB, Charset, CharsetAccepted}
 		out = append(out, charset...)
 		out = append(out, IAC, SE)
-		Dispatch(ctx, event.Event{Name: EventSend, Data: out})
-		Dispatch(ctx, event.Event{Name: EventCharsetAccepted, Data: CharsetData{Encoding: enc}})
+		dispatch(ctx, event.Event{Name: EventSend, Data: out})
+		dispatch(ctx, event.Event{Name: EventCharsetAccepted, Data: CharsetData{Encoding: enc}})
 	}
 	return nil
 }
