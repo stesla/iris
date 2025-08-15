@@ -21,9 +21,8 @@ type OptionState interface {
 }
 
 type OptionMap interface {
+	event.Listener
 	Get(opt byte) OptionState
-
-	handleNegotiation(ctx context.Context, ev event.Event) error
 	set(OptionState)
 }
 
@@ -45,7 +44,7 @@ func (m *optionMap) Get(opt byte) OptionState {
 	return m.m[opt]
 }
 
-func (m *optionMap) handleNegotiation(ctx context.Context, ev event.Event) error {
+func (m *optionMap) Listen(ctx context.Context, ev event.Event) error {
 	negotiation := ev.Data.(Negotiation)
 	opt := m.m[negotiation.Opt]
 	opt.receive(ctx, negotiation.Cmd)

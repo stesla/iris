@@ -107,7 +107,7 @@ func TestCharsetSubnegotiation(t *testing.T) {
 	options := NewOptionMap()
 	options.set(&optionState{opt: Charset, them: qYes, us: qYes})
 	dispatcher := event.NewDispatcher()
-	dispatcher.ListenFunc(EventNegotation, options.handleNegotiation)
+	dispatcher.Listen(EventNegotation, options)
 	ctx := context.Background()
 	ctx = context.WithValue(ctx, KeyDispatcher, dispatcher)
 	ctx = context.WithValue(ctx, KeyOptionMap, options)

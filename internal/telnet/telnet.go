@@ -11,21 +11,17 @@ import (
 
 type Conn interface {
 	net.Conn
-	event.Dispatcher
 	Encodable
-	OptionMap
-
 	Context() context.Context
 	RegisterHandler(Handler)
 }
 
 type conn struct {
 	net.Conn
-	event.Dispatcher
-	OptionMap
 
-	ctx context.Context
-
+	ctx               context.Context
+	dispatcher        event.Dispatcher
+	options           OptionMap
 	readNoEnc, read   io.Reader
 	writeNoEnc, write io.Writer
 }
@@ -62,18 +58,18 @@ func wrap(c net.Conn) *conn {
 	options := NewOptionMap()
 	cc := &conn{
 		Conn:       c,
-		Dispatcher: dispatcher,
-		OptionMap:  options,
+		dispatcher: dispatcher,
+		options:    options,
 		ctx:        context.Background(),
 	}
-	cc.ctx = context.WithValue(cc.ctx, KeyDispatcher, cc)
-	cc.ctx = context.WithValue(cc.ctx, KeyOptionMap, cc)
+	cc.ctx = context.WithValue(cc.ctx, KeyDispatcher, dispatcher)
+	cc.ctx = context.WithValue(cc.ctx, KeyOptionMap, options)
 	cc.ctx = context.WithValue(cc.ctx, KeyEncodable, cc)
 	cc.readNoEnc = &reader{in: c, ctx: cc.ctx}
 	cc.writeNoEnc = &writer{out: c, ctx: cc.ctx}
 	SetEncoding(cc.ctx, ASCII)
-	cc.ListenFunc(EventNegotation, cc.handleNegotiation)
-	cc.ListenFunc(EventSend, cc.handleSend)
+	dispatcher.Listen(EventNegotation, options)
+	dispatcher.ListenFunc(EventSend, cc.handleSend)
 	return cc
 }
 

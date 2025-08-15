@@ -184,7 +184,7 @@ func TestOptionMapHandleNegotiation(t *testing.T) {
 	}
 	for _, test := range tests {
 		actual = nil
-		m.handleNegotiation(ctx, event.Event{Name: EventNegotation, Data: test.data})
+		m.Listen(ctx, event.Event{Name: EventNegotation, Data: test.data})
 		require.Equal(t, test.expected, actual)
 	}
 }
