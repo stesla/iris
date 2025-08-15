@@ -16,7 +16,7 @@ var (
 )
 
 func main() {
-	logger := zerolog.New(os.Stdout)
+	logger := Logger{Logger: zerolog.New(os.Stdout)}
 
 	l, err := net.Listen("tcp", *addr)
 	if err != nil {
@@ -35,31 +35,12 @@ func main() {
 
 		conn := telnet.Wrap(ctx, tcp)
 
-		logEvent := func(_ context.Context, ev event.Event) error {
-			log := logger.Trace().Str("event", string(ev.Name))
-			switch t := ev.Data.(type) {
-			case []byte:
-				log.Bytes("data", t)
-			case telnet.OptionData:
-				log.Uint8("option", t.Option()).
-					Bool("changedThem", t.ChangedThem).
-					Bool("changedUs", t.ChangedUs).
-					Bool("enabledThem", t.EnabledForThem()).
-					Bool("enabledUs", t.EnabledForUs())
-			case telnet.Subnegotiation:
-				log.Uint8("option", t.Opt).Bytes("data", t.Data)
-			default:
-				log.Any("data", t)
-			}
-			log.Send()
-			return nil
-		}
-		conn.ListenFunc(telnet.EventNegotation, logEvent)
-		conn.ListenFunc(telnet.EventOption, logEvent)
-		conn.ListenFunc(telnet.EventSubnegotiation, logEvent)
-		conn.ListenFunc(telnet.EventSend, logEvent)
-		conn.ListenFunc(telnet.EventCharsetAccepted, logEvent)
-		conn.ListenFunc(telnet.EventCharsetRejected, logEvent)
+		conn.Listen(telnet.EventNegotation, logger)
+		conn.Listen(telnet.EventOption, logger)
+		conn.Listen(telnet.EventSubnegotiation, logger)
+		conn.Listen(telnet.EventSend, logger)
+		conn.Listen(telnet.EventCharsetAccepted, logger)
+		conn.Listen(telnet.EventCharsetRejected, logger)
 
 		go func() {
 			defer conn.Close()
@@ -76,4 +57,28 @@ func getEnvDefault(name, defaultValue string) string {
 		return value
 	}
 	return defaultValue
+}
+
+type Logger struct {
+	zerolog.Logger
+}
+
+func (l Logger) Listen(_ context.Context, ev event.Event) error {
+	log := l.Trace().Str("event", string(ev.Name))
+	switch t := ev.Data.(type) {
+	case []byte:
+		log.Bytes("data", t)
+	case telnet.OptionData:
+		log.Uint8("option", t.Option()).
+			Bool("changedThem", t.ChangedThem).
+			Bool("changedUs", t.ChangedUs).
+			Bool("enabledThem", t.EnabledForThem()).
+			Bool("enabledUs", t.EnabledForUs())
+	case telnet.Subnegotiation:
+		log.Uint8("option", t.Opt).Bytes("data", t.Data)
+	default:
+		log.Any("data", t)
+	}
+	log.Send()
+	return nil
 }
