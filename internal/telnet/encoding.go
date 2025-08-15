@@ -54,25 +54,29 @@ func (a asciiEncoding) Transform(dst, src []byte, atEOF bool) (nDst, nSrc int, e
 
 func (a asciiEncoding) Reset() {}
 
-type TransmitBinaryHandler struct{}
+type TransmitBinaryHandler struct {
+	ctx context.Context
+}
 
 func (h *TransmitBinaryHandler) Register(ctx context.Context) {
+	h.ctx = ctx
+
 	GetOption(ctx, TransmitBinary).Allow(true, true)
 
 	d := ctx.Value(KeyDispatcher).(event.Dispatcher)
 	d.Listen(EventOption, h)
 }
 
-func (h *TransmitBinaryHandler) Unregister(ctx context.Context) {
-	d := ctx.Value(KeyDispatcher).(event.Dispatcher)
+func (h *TransmitBinaryHandler) Unregister() {
+	d := h.ctx.Value(KeyDispatcher).(event.Dispatcher)
 	d.RemoveListener(EventOption, h)
 
-	opt := GetOption(ctx, TransmitBinary)
+	opt := GetOption(h.ctx, TransmitBinary)
 	opt.Allow(false, false)
-	opt.DisableForThem(ctx)
-	opt.DisableForUs(ctx)
+	opt.DisableForThem(h.ctx)
+	opt.DisableForUs(h.ctx)
 
-	SetEncoding(ctx, ASCII)
+	SetEncoding(h.ctx, ASCII)
 }
 
 func (h *TransmitBinaryHandler) Listen(ctx context.Context, ev event.Event) error {
@@ -102,10 +106,13 @@ func (h *TransmitBinaryHandler) Listen(ctx context.Context, ev event.Event) erro
 }
 
 type CharsetHandler struct {
+	ctx context.Context
 	enc encoding.Encoding
 }
 
 func (h *CharsetHandler) Register(ctx context.Context) {
+	h.ctx = ctx
+
 	GetOption(ctx, Charset).Allow(true, true)
 
 	d := ctx.Value(KeyDispatcher).(event.Dispatcher)
@@ -115,10 +122,10 @@ func (h *CharsetHandler) Register(ctx context.Context) {
 	d.Listen(EventCharsetRejected, h)
 }
 
-func (h *CharsetHandler) Unregister(ctx context.Context) {
-	GetOption(ctx, Charset).Allow(false, false)
+func (h *CharsetHandler) Unregister() {
+	GetOption(h.ctx, Charset).Allow(false, false)
 
-	d := ctx.Value(KeyDispatcher).(event.Dispatcher)
+	d := h.ctx.Value(KeyDispatcher).(event.Dispatcher)
 	d.RemoveListener(EventCharsetRejected, h)
 	d.RemoveListener(EventCharsetAccepted, h)
 	d.RemoveListener(EventSubnegotiation, h)

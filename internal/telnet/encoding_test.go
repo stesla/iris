@@ -32,7 +32,8 @@ func TestTransmitBinary(t *testing.T) {
 	tcp := &mockConn{Writer: &output}
 	telnet := Wrap(tcp)
 
-	unregister := telnet.RegisterHandler(&TransmitBinaryHandler{})
+	handler := &TransmitBinaryHandler{}
+	telnet.RegisterHandler(handler)
 	Dispatch(telnet.Context(), event.Event{
 		Name: EventOption,
 		Data: OptionData{OptionState: &optionState{opt: TransmitBinary, them: qYes, us: qYes}, ChangedThem: true, ChangedUs: true},
@@ -73,7 +74,7 @@ func TestTransmitBinary(t *testing.T) {
 		Data: OptionData{OptionState: &optionState{opt: TransmitBinary, them: qYes, us: qYes}, ChangedThem: true, ChangedUs: true},
 	})
 
-	unregister()
+	handler.Unregister()
 
 	tcp.Reader = bytes.NewReader([]byte{128, 129, 255, 255})
 	n, err = telnet.Read(buf)

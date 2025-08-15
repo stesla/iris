@@ -16,7 +16,7 @@ type Conn interface {
 	OptionMap
 
 	Context() context.Context
-	RegisterHandler(Handler) (unregister func())
+	RegisterHandler(Handler)
 }
 
 type conn struct {
@@ -101,14 +101,11 @@ func (c *conn) Read(p []byte) (n int, err error) {
 
 type Handler interface {
 	Register(ctx context.Context)
-	Unregister(ctx context.Context)
+	Unregister()
 }
 
-func (c *conn) RegisterHandler(h Handler) func() {
+func (c *conn) RegisterHandler(h Handler) {
 	h.Register(c.ctx)
-	return func() {
-		h.Unregister(c.ctx)
-	}
 }
 
 func (c *conn) SetReadEncoding(enc encoding.Encoding) {
