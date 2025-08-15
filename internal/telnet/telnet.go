@@ -12,15 +12,18 @@ import (
 type Conn interface {
 	net.Conn
 	Encodable
+	event.Dispatcher
+
 	Context() context.Context
+	GetOption(byte) OptionState
 	RegisterHandler(Handler)
 }
 
 type conn struct {
 	net.Conn
+	event.Dispatcher
 
 	ctx               context.Context
-	dispatcher        event.Dispatcher
 	options           OptionMap
 	readNoEnc, read   io.Reader
 	writeNoEnc, write io.Writer
@@ -53,7 +56,7 @@ func wrap(ctx context.Context, c net.Conn) *conn {
 	options := NewOptionMap()
 	cc := &conn{
 		Conn:       c,
-		dispatcher: dispatcher,
+		Dispatcher: dispatcher,
 		options:    options,
 		ctx:        ctx,
 	}
@@ -93,6 +96,10 @@ func (c *conn) Read(p []byte) (n int, err error) {
 type Handler interface {
 	Register(ctx context.Context)
 	Unregister()
+}
+
+func (c *conn) GetOption(opt byte) OptionState {
+	return c.options.Get(opt)
 }
 
 func (c *conn) RegisterHandler(h Handler) {

@@ -154,16 +154,16 @@ func TestReadCommand(t *testing.T) {
 		}
 		tcp := &mockConn{Reader: bytes.NewReader(test.val), Writer: io.Discard}
 		telnet := wrap(context.Background(), tcp)
-		telnet.dispatcher.ListenFunc(EventEndOfRecord, func(context.Context, event.Event) error {
+		telnet.Dispatcher.ListenFunc(EventEndOfRecord, func(context.Context, event.Event) error {
 			capturedEvent = "end of record"
 			return nil
 		})
-		telnet.dispatcher.ListenFunc(EventGoAhead, func(context.Context, event.Event) error {
+		telnet.Dispatcher.ListenFunc(EventGoAhead, func(context.Context, event.Event) error {
 			capturedEvent = "go ahead"
 			return nil
 		})
-		telnet.dispatcher.ListenFunc(EventNegotation, captureEvent)
-		telnet.dispatcher.ListenFunc(EventSubnegotiation, captureEvent)
+		telnet.Dispatcher.ListenFunc(EventNegotation, captureEvent)
+		telnet.Dispatcher.ListenFunc(EventSubnegotiation, captureEvent)
 		buf := make([]byte, bufsize)
 		n, err := telnet.Read(buf)
 		require.NoError(t, err)

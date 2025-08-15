@@ -40,8 +40,8 @@ func (h *TransmitBinaryHandler) Unregister() {
 
 	opt := getOption(h.ctx, TransmitBinary)
 	opt.Allow(false, false)
-	opt.DisableForThem(h.ctx)
-	opt.DisableForUs(h.ctx)
+	opt.DisableThem(h.ctx)
+	opt.DisableUs(h.ctx)
 
 	setEncoding(h.ctx, ASCII)
 }
@@ -130,10 +130,12 @@ func (h *CharsetHandler) Listen(ctx context.Context, ev event.Event) error {
 	case OptionData:
 		switch t.Option() {
 		case TransmitBinary:
-			if them, us := t.EnabledForThem(), t.EnabledForUs(); them && us {
-				setEncoding(ctx, h.enc)
-			} else {
-				setEncoding(ctx, ASCII)
+			if h.enc != nil {
+				if them, us := t.EnabledForThem(), t.EnabledForUs(); them && us {
+					setEncoding(ctx, h.enc)
+				} else {
+					setEncoding(ctx, ASCII)
+				}
 			}
 		}
 	case Subnegotiation:

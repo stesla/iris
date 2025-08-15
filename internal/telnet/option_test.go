@@ -78,10 +78,10 @@ func TestOptionEnableOrDisable(t *testing.T) {
 	})
 	ctx := context.WithValue(context.Background(), KeyDispatcher, d)
 
-	disableThem := func(os *optionState) { os.DisableForThem(ctx) }
-	disableUs := func(os *optionState) { os.DisableForUs(ctx) }
-	enableThem := func(os *optionState) { os.EnableForThem(ctx) }
-	enableUs := func(os *optionState) { os.EnableForUs(ctx) }
+	disableThem := func(os *optionState) { os.DisableThem(ctx) }
+	disableUs := func(os *optionState) { os.DisableUs(ctx) }
+	enableThem := func(os *optionState) { os.EnableThem(ctx) }
+	enableUs := func(os *optionState) { os.EnableUs(ctx) }
 	var tests = []struct {
 		fn    func(*optionState)
 		start optionState

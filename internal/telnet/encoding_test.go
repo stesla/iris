@@ -241,14 +241,17 @@ func TestCharsetSubnegotiation(t *testing.T) {
 }
 
 type mockEncodable struct {
+	t                 *testing.T
 	readEnc, writeEnc encoding.Encoding
 }
 
 func (m *mockEncodable) SetReadEncoding(enc encoding.Encoding) {
+	require.NotNil(m.t, enc)
 	m.readEnc = enc
 }
 
 func (m *mockEncodable) SetWriteEncoding(enc encoding.Encoding) {
+	require.NotNil(m.t, enc)
 	m.writeEnc = enc
 }
 
@@ -263,7 +266,7 @@ func TestCharsetSetsEncoding(t *testing.T) {
 		}
 		return nil
 	})
-	encodable := &mockEncodable{}
+	encodable := &mockEncodable{t: t}
 	ctx := context.Background()
 	ctx = context.WithValue(ctx, KeyDispatcher, dispatcher)
 	ctx = context.WithValue(ctx, KeyOptionMap, options)
@@ -297,10 +300,11 @@ func TestCharsetSetsEncoding(t *testing.T) {
 	for _, test := range tests {
 		options.set(&optionState{opt: TransmitBinary})
 		h := &CharsetHandler{}
-		*encodable = mockEncodable{}
+		*encodable = mockEncodable{t: t}
 		h.Register(ctx)
 		for _, event := range test.events {
-			dispatch(ctx, event)
+			err := dispatch(ctx, event)
+			require.NoError(t, err)
 		}
 		require.Equal(t, test.expectedReadEnc, encodable.readEnc)
 		require.Equal(t, test.expectedWriteEnc, encodable.writeEnc)

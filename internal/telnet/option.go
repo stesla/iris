@@ -8,13 +8,17 @@ import (
 )
 
 type OptionState interface {
-	Allow(them, us bool)
-	AllowThem(bool)
-	AllowUs(bool)
-	DisableForThem(ctx context.Context)
-	DisableForUs(ctx context.Context)
-	EnableForThem(ctx context.Context)
-	EnableForUs(ctx context.Context)
+	Allow(them, us bool) OptionState
+	AllowThem(bool) OptionState
+	AllowUs(bool) OptionState
+	DisableBoth(ctx context.Context) OptionState
+	DisableThem(ctx context.Context) OptionState
+	DisableUs(ctx context.Context) OptionState
+	EnableBoth(ctx context.Context) OptionState
+	EnableThem(ctx context.Context) OptionState
+	EnableUs(ctx context.Context) OptionState
+
+	Enabled() (them, us bool)
 	EnabledForThem() bool
 	EnabledForUs() bool
 	Option() byte
@@ -75,37 +79,57 @@ type optionState struct {
 	us        qState
 }
 
-func (o *optionState) Allow(them, us bool) {
+func (o *optionState) Allow(them, us bool) OptionState {
 	o.AllowThem(them)
 	o.AllowUs(us)
+	return o
 }
 
-func (o *optionState) AllowThem(allow bool) {
+func (o *optionState) AllowThem(allow bool) OptionState {
 	o.allowThem = allow
+	return o
 }
 
-func (o *optionState) AllowUs(allow bool) {
+func (o *optionState) AllowUs(allow bool) OptionState {
 	o.allowUs = allow
+	return o
 }
 
-func (o *optionState) DisableForThem(ctx context.Context) {
+func (o *optionState) DisableBoth(ctx context.Context) OptionState {
+	o.DisableThem(ctx)
+	o.DisableUs(ctx)
+	return o
+}
+
+func (o *optionState) DisableThem(ctx context.Context) OptionState {
 	o.disable(ctx, &o.them, DONT)
+	return o
 }
 
-func (o *optionState) DisableForUs(ctx context.Context) {
+func (o *optionState) DisableUs(ctx context.Context) OptionState {
 	o.disable(ctx, &o.us, WONT)
+	return o
 }
 
-func (o *optionState) EnableForThem(ctx context.Context) {
+func (o *optionState) EnableBoth(ctx context.Context) OptionState {
+	o.EnableThem(ctx)
+	o.EnableUs(ctx)
+	return o
+}
+
+func (o *optionState) EnableThem(ctx context.Context) OptionState {
 	o.enable(ctx, &o.them, DO)
+	return o
 }
 
-func (o *optionState) EnableForUs(ctx context.Context) {
+func (o *optionState) EnableUs(ctx context.Context) OptionState {
 	o.enable(ctx, &o.us, WILL)
+	return o
 }
 
-func (o *optionState) EnabledForThem() bool { return o.them == qYes }
-func (o *optionState) EnabledForUs() bool   { return o.us == qYes }
+func (o *optionState) Enabled() (them, us bool) { return o.EnabledForThem(), o.EnabledForUs() }
+func (o *optionState) EnabledForThem() bool     { return o.them == qYes }
+func (o *optionState) EnabledForUs() bool       { return o.us == qYes }
 
 func (o *optionState) Option() byte { return o.opt }
 
