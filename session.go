@@ -106,6 +106,7 @@ func (s *session) negotiateOptions() {
 type downstreamSession struct {
 	*session
 	*bufio.Scanner
+	upstream *upstreamSession
 }
 
 func newDownstreamSession(conn telnet.Conn) *downstreamSession {
@@ -126,31 +127,34 @@ func (s *downstreamSession) authenticate() bool {
 	return false
 }
 
-func (s *downstreamSession) findUpstream() (*upstreamSession, error) {
+func (s *downstreamSession) connectNewUpstream(rest string, buf bytes.Buffer) error {
+	if s.upstream == nil {
+		return errors.New("you must select an upstream to connect")
+	}
+	addr := strings.TrimSpace(rest)
+	fmt.Fprintf(s, "connecting to %v...", addr)
+	if err := s.upstream.Connect(addr); err != nil {
+		return fmt.Errorf("error connecting (%v): %w", addr, err)
+	}
+	if _, err := s.upstream.Write(buf.Bytes()); err != nil {
+		return fmt.Errorf("error writing to (%v): %w", addr, err)
+	}
+	return nil
+}
+
+func (s *downstreamSession) findUpstream() error {
 	var buf bytes.Buffer
-	var upstream *upstreamSession
 	for s.Scan() {
 		switch command, rest, _ := strings.Cut(s.Text(), " "); command {
 		case "connect":
-			if upstream == nil {
-				return nil, errors.New("you must select an upstream to connect")
-			}
-			addr := strings.TrimSpace(rest)
-			fmt.Fprintf(s, "connecting to %v...", addr)
-			if err := upstream.Connect(addr); err != nil {
-				return upstream, fmt.Errorf("error connecting (%v): %w", addr, err)
-			}
-			if _, err := upstream.Write(buf.Bytes()); err != nil {
-				return upstream, fmt.Errorf("error writing to (%v): %w", addr, err)
-			}
-			return upstream, nil
+			return s.connectNewUpstream(rest, buf)
 		case "send":
 			fmt.Fprintln(&buf, rest)
 		case "upstream":
-			upstream = sessionForKey(rest)
-			upstream.AddDownstream(s)
-			if upstream.IsConnected() {
-				return upstream, nil
+			s.upstream = sessionForKey(rest)
+			s.upstream.AddDownstream(s)
+			if s.upstream.IsConnected() {
+				return nil
 			}
 		default:
 			fmt.Fprintln(s, "unrecognized command:", s.Text())
@@ -158,7 +162,7 @@ func (s *downstreamSession) findUpstream() (*upstreamSession, error) {
 	}
 	// the only case where we ever get here is if we fail to scan, which will
 	// only happen if the client disconnected
-	return nil, io.EOF
+	return io.EOF
 }
 
 func (s *downstreamSession) runForever() {
@@ -169,12 +173,12 @@ func (s *downstreamSession) runForever() {
 	if !s.authenticate() {
 		return
 	}
-	upstream, err := s.findUpstream()
+	err := s.findUpstream()
 	if err != nil {
 		fmt.Fprintln(s, "error connecting upstream:", err)
 		return
 	}
-	io.Copy(upstream, s)
+	io.Copy(s.upstream, s)
 }
 
 type upstreamSession struct {
