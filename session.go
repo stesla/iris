@@ -16,22 +16,42 @@ import (
 )
 
 type session struct {
-	telnet.Conn
+	conn           telnet.Conn
 	logger         zerolog.Logger
 	charset        telnet.CharsetHandler
 	transmitBinary telnet.TransmitBinaryHandler
 }
 
-func newSession(conn telnet.Conn, baselog zerolog.Logger) *session {
+func newSession(conn telnet.Conn, logger zerolog.Logger) *session {
 	s := &session{
-		Conn:   conn,
-		logger: baselog,
+		conn:   conn,
+		logger: logger,
 	}
-	s.RegisterHandler(LogHandler{Logger: s.logger})
-	s.RegisterHandler(&s.transmitBinary)
-	s.RegisterHandler(&s.charset)
-	s.ListenFunc(telnet.EventOption, s.handleEvent)
+	s.conn.RegisterHandler(LogHandler{Logger: s.logger})
+	s.conn.RegisterHandler(&s.transmitBinary)
+	s.conn.RegisterHandler(&s.charset)
+	s.conn.ListenFunc(telnet.EventOption, s.handleEvent)
 	return s
+}
+
+func (s *session) Close() error {
+	return s.conn.Close()
+}
+
+func (s *session) Context() context.Context {
+	return s.conn.Context()
+}
+
+func (s *session) GetOption(opt byte) telnet.OptionState {
+	return s.conn.GetOption(opt)
+}
+
+func (s *session) Read(p []byte) (n int, err error) {
+	return s.conn.Read(p)
+}
+
+func (s *session) Write(p []byte) (n int, err error) {
+	return s.conn.Write(p)
 }
 
 func (s *session) handleEvent(_ context.Context, ev event.Event) error {
@@ -122,7 +142,7 @@ func (s *upstreamSession) AddDownstream(w io.WriteCloser) {
 }
 
 func (s *upstreamSession) Close() error {
-	s.Conn.Close()
+	s.conn.Close()
 	for _, w := range s.downstream {
 		w.Close()
 	}
