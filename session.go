@@ -2,7 +2,9 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -14,6 +16,28 @@ import (
 	"github.com/stesla/iris/internal/telnet"
 	"golang.org/x/text/encoding/unicode"
 )
+
+const readBufSize = 4096
+
+var (
+	sessionsMutex sync.Mutex
+	sessions      = make(map[string]*upstreamSession)
+)
+
+func sessionForKey(key string) *upstreamSession {
+	sessionsMutex.Lock()
+	defer sessionsMutex.Unlock()
+	if _, found := sessions[key]; !found {
+		sessions[key] = &upstreamSession{key: key}
+	}
+	return sessions[key]
+}
+
+func deleteSessionWithKey(key string) {
+	sessionsMutex.Lock()
+	defer sessionsMutex.Unlock()
+	delete(sessions, key)
+}
 
 type session struct {
 	conn           telnet.Conn
@@ -103,17 +127,27 @@ func (s *downstreamSession) authenticate() bool {
 }
 
 func (s *downstreamSession) findUpstream() (*upstreamSession, error) {
+	var buf bytes.Buffer
+	var upstream *upstreamSession
 	for s.Scan() {
 		switch command, rest, _ := strings.Cut(s.Text(), " "); command {
 		case "connect":
-			addr := strings.TrimSpace(rest)
-			fmt.Fprintf(s, "connecting to %v...", addr)
-			upstream := &upstreamSession{}
-			if err := upstream.Initialize(addr); err != nil {
-				fmt.Fprintf(s, "error connecting (%v): %v", addr, err)
+			if upstream == nil {
+				return nil, errors.New("you must select an upstream to connect")
 			}
 			upstream.AddDownstream(s)
+			if upstream.IsNew() {
+				addr := strings.TrimSpace(rest)
+				fmt.Fprintf(s, "connecting to %v...", addr)
+				if err := upstream.Initialize(addr, buf.Bytes()); err != nil {
+					return upstream, fmt.Errorf("error connecting (%v): %w", addr, err)
+				}
+			}
 			return upstream, nil
+		case "send":
+			fmt.Fprintln(&buf, rest)
+		case "upstream":
+			upstream = sessionForKey(rest)
 		default:
 			fmt.Fprintln(s, "unrecognized command:", s.Text())
 		}
@@ -141,11 +175,12 @@ func (s *downstreamSession) runForever() {
 
 type upstreamSession struct {
 	*session
+	key        string
 	mux        sync.Mutex
 	downstream []io.WriteCloser
 }
 
-func (s *upstreamSession) Initialize(addr string) error {
+func (s *upstreamSession) Initialize(addr string, toSend []byte) error {
 	tcp, err := net.Dial("tcp", addr)
 	if err != nil {
 		return err
@@ -154,6 +189,9 @@ func (s *upstreamSession) Initialize(addr string) error {
 	s.session = newSession(conn, logger.With().
 		Str("server", conn.RemoteAddr().String()).
 		Logger())
+	if _, err := s.Write(toSend); err != nil {
+		return err
+	}
 	go s.runForever()
 	return nil
 }
@@ -172,14 +210,17 @@ func (s *upstreamSession) Close() error {
 	return nil
 }
 
-const proxyBufSize = 4096
+func (s *upstreamSession) IsNew() bool {
+	return s.session == nil
+}
 
 func (s *upstreamSession) runForever() {
+	defer deleteSessionWithKey(s.key)
 	defer s.Close()
 	s.logger.Debug().Msg("connected")
 	s.negotiateOptions()
 	for {
-		var buf = make([]byte, proxyBufSize)
+		var buf = make([]byte, readBufSize)
 		n, err := s.Read(buf)
 		if err != nil {
 			break
