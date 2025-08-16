@@ -15,8 +15,14 @@ var (
 	addr = flag.String("addr", getEnvDefault("IRIS_ADDR", ":4001"), "address on which to listen")
 )
 
+type contextKey string
+
+const (
+	KeyLogger contextKey = "logger"
+)
+
 func main() {
-	logger := Logger{Logger: zerolog.New(os.Stdout)}
+	logger := zerolog.New(os.Stdout)
 
 	l, err := net.Listen("tcp", *addr)
 	if err != nil {
@@ -34,20 +40,10 @@ func main() {
 		ctx := context.Background()
 
 		conn := telnet.Wrap(ctx, tcp)
-
-		conn.Listen(telnet.EventNegotation, logger)
-		conn.Listen(telnet.EventOption, logger)
-		conn.Listen(telnet.EventSubnegotiation, logger)
-		conn.Listen(telnet.EventSend, logger)
-		conn.Listen(telnet.EventCharsetAccepted, logger)
-		conn.Listen(telnet.EventCharsetRejected, logger)
-
 		go func() {
 			defer conn.Close()
-			logger.Debug().Str("peer", conn.RemoteAddr().String()).Msg("connected")
-			session := newSession(conn)
+			session := newSession(conn, logger)
 			session.runForever()
-			logger.Debug().Str("peer", conn.RemoteAddr().String()).Msg("disconnected")
 		}()
 	}
 }
@@ -59,12 +55,34 @@ func getEnvDefault(name, defaultValue string) string {
 	return defaultValue
 }
 
-type Logger struct {
+type LogHandler struct {
+	ctx context.Context
 	zerolog.Logger
 }
 
-func (l Logger) Listen(_ context.Context, ev event.Event) error {
-	log := l.Trace().Str("event", string(ev.Name))
+func (h LogHandler) Register(ctx context.Context) {
+	h.ctx = ctx
+	dispatcher := ctx.Value(telnet.KeyDispatcher).(event.Dispatcher)
+	dispatcher.Listen(telnet.EventNegotation, h)
+	dispatcher.Listen(telnet.EventOption, h)
+	dispatcher.Listen(telnet.EventSubnegotiation, h)
+	dispatcher.Listen(telnet.EventSend, h)
+	dispatcher.Listen(telnet.EventCharsetAccepted, h)
+	dispatcher.Listen(telnet.EventCharsetRejected, h)
+}
+
+func (h LogHandler) Unregister() {
+	dispatcher := h.ctx.Value(telnet.KeyDispatcher).(event.Dispatcher)
+	dispatcher.RemoveListener(telnet.EventNegotation, h)
+	dispatcher.RemoveListener(telnet.EventOption, h)
+	dispatcher.RemoveListener(telnet.EventSubnegotiation, h)
+	dispatcher.RemoveListener(telnet.EventSend, h)
+	dispatcher.RemoveListener(telnet.EventCharsetAccepted, h)
+	dispatcher.RemoveListener(telnet.EventCharsetRejected, h)
+}
+
+func (h LogHandler) Listen(_ context.Context, ev event.Event) error {
+	log := h.Trace().Str("event", string(ev.Name))
 	switch t := ev.Data.(type) {
 	case []byte:
 		log.Bytes("data", t)
