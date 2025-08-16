@@ -95,25 +95,48 @@ func newDownstreamSession(conn telnet.Conn) *downstreamSession {
 	return result
 }
 
-func (s *downstreamSession) runForever() {
-	s.logger.Debug().Msg("connected")
-	s.negotiateOptions()
+func (s *downstreamSession) authenticate() bool {
+	if s.Scan() {
+		return s.Text() == "login "+*password
+	}
+	return false
+}
+
+func (s *downstreamSession) findUpstream() (*upstreamSession, error) {
 	for s.Scan() {
 		switch command, rest, _ := strings.Cut(s.Text(), " "); command {
 		case "connect":
 			addr := strings.TrimSpace(rest)
 			fmt.Fprintf(s, "connecting to %v...", addr)
-			var upstream upstreamSession
+			upstream := &upstreamSession{}
 			if err := upstream.Initialize(addr); err != nil {
 				fmt.Fprintf(s, "error connecting (%v): %v", addr, err)
 			}
 			upstream.AddDownstream(s)
-			io.Copy(&upstream, s)
+			return upstream, nil
 		default:
 			fmt.Fprintln(s, "unrecognized command:", s.Text())
 		}
 	}
-	s.logger.Debug().Msg("disconnected")
+	// the only case where we ever get here is if we fail to scan, which will
+	// only happen if the client disconnected
+	return nil, io.EOF
+}
+
+func (s *downstreamSession) runForever() {
+	s.logger.Debug().Msg("connected")
+	defer s.logger.Debug().Msg("disconnected")
+
+	s.negotiateOptions()
+	if !s.authenticate() {
+		return
+	}
+	upstream, err := s.findUpstream()
+	if err != nil {
+		fmt.Fprintln(s, "error connecting upstream:", err)
+		return
+	}
+	io.Copy(upstream, s)
 }
 
 type upstreamSession struct {

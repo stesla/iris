@@ -10,10 +10,17 @@ import (
 )
 
 var (
-	addr = flag.String("addr", getEnvDefault("IRIS_ADDR", ":4001"), "address on which to listen")
+	addr     = flag.String("addr", getEnvDefault("IRIS_ADDR", ":4001"), "address on which to listen")
+	password = flag.String("password", os.Getenv("IRIS_PASSWORD"), "password for server access")
 )
 
 func main() {
+	flag.Parse()
+
+	if *password == "" {
+		logger.Fatal().Msg("must provide -password or set ENVOY_PASSWORD")
+	}
+
 	l, err := net.Listen("tcp", *addr)
 	if err != nil {
 		logger.Fatal().Err(err).Send()
