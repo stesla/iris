@@ -17,40 +17,53 @@ import (
 
 type session struct {
 	telnet.Conn
-	*bufio.Scanner
 	logger         zerolog.Logger
 	charset        telnet.CharsetHandler
 	transmitBinary telnet.TransmitBinaryHandler
 }
 
-func newSession(conn telnet.Conn, logger zerolog.Logger) *session {
-	result := &session{
-		Conn:    conn,
-		Scanner: bufio.NewScanner(conn),
-		logger: logger.With().
-			Str("client", conn.RemoteAddr().String()).
-			Logger(),
-		charset: telnet.CharsetHandler{IsServer: true},
+func newSession(conn telnet.Conn, baselog zerolog.Logger) *session {
+	s := &session{
+		Conn:   conn,
+		logger: baselog,
 	}
-	conn.RegisterHandler(LogHandler{Logger: result.logger})
-	conn.RegisterHandler(&result.transmitBinary)
-	conn.RegisterHandler(&result.charset)
-	conn.ListenFunc(telnet.EventOption, func(ctx context.Context, ev event.Event) error {
-		switch opt := ev.Data.(type) {
-		case telnet.OptionData:
-			switch opt.Option() {
-			case telnet.Charset:
-				if opt.ChangedUs && opt.EnabledForUs() {
-					result.charset.RequestEncoding(unicode.UTF8)
-				}
+	s.RegisterHandler(LogHandler{Logger: s.logger})
+	s.RegisterHandler(&s.transmitBinary)
+	s.RegisterHandler(&s.charset)
+	s.ListenFunc(telnet.EventOption, s.handleEvent)
+	return s
+}
+
+func (s *session) handleEvent(_ context.Context, ev event.Event) error {
+	switch opt := ev.Data.(type) {
+	case telnet.OptionData:
+		switch opt.Option() {
+		case telnet.Charset:
+			if opt.ChangedUs && opt.EnabledForUs() {
+				s.charset.RequestEncoding(unicode.UTF8)
 			}
 		}
-		return nil
-	})
+	}
+	return nil
+}
+
+type downstreamSession struct {
+	*session
+	*bufio.Scanner
+}
+
+func newDownstreamSession(conn telnet.Conn) *downstreamSession {
+	result := &downstreamSession{
+		session: newSession(conn, logger.With().
+			Str("client", conn.RemoteAddr().String()).
+			Logger()),
+		Scanner: bufio.NewScanner(conn),
+	}
+	result.charset.IsServer = true
 	return result
 }
 
-func (s *session) runForever() {
+func (s *downstreamSession) runForever() {
 	s.logger.Debug().Msg("connected")
 	s.GetOption(telnet.SuppressGoAhead).Allow(true, true).EnableBoth(s.Context())
 	s.GetOption(telnet.EndOfRecord).Allow(true, true).EnableBoth(s.Context())
@@ -61,12 +74,12 @@ func (s *session) runForever() {
 		case "connect":
 			addr := strings.TrimSpace(rest)
 			fmt.Fprintf(s, "connecting to %v...", addr)
-			var p proxy
-			if err := p.Initialize(s.logger, addr); err != nil {
+			var upstream upstreamSession
+			if err := upstream.Initialize(addr); err != nil {
 				fmt.Fprintf(s, "error connecting (%v): %v", addr, err)
 			}
-			p.AddDownstream(s)
-			io.Copy(&p, s)
+			upstream.AddDownstream(s)
+			io.Copy(&upstream, s)
 		default:
 			fmt.Fprintln(s, "unrecognized command:", s.Text())
 		}
@@ -74,52 +87,32 @@ func (s *session) runForever() {
 	s.logger.Debug().Msg("disconnected")
 }
 
-type proxy struct {
-	telnet.Conn
-	logger zerolog.Logger
-	mux    sync.Mutex
-
+type upstreamSession struct {
+	*session
+	mux        sync.Mutex
 	downstream []io.WriteCloser
-
-	charset        telnet.CharsetHandler
-	transmitBinary telnet.TransmitBinaryHandler
 }
 
-func (p *proxy) Initialize(logger zerolog.Logger, addr string) error {
+func (p *upstreamSession) Initialize(addr string) error {
 	tcp, err := net.Dial("tcp", addr)
 	if err != nil {
 		return err
 	}
-	p.Conn = telnet.Wrap(context.Background(), tcp)
-	p.logger = logger.With().
-		Str("server", p.Conn.RemoteAddr().String()).
-		Logger()
-	p.Conn.RegisterHandler(LogHandler{Logger: p.logger})
-	p.Conn.RegisterHandler(&p.transmitBinary)
-	p.Conn.RegisterHandler(&p.charset)
-	p.Conn.ListenFunc(telnet.EventOption, func(ctx context.Context, ev event.Event) error {
-		switch opt := ev.Data.(type) {
-		case telnet.OptionData:
-			switch opt.Option() {
-			case telnet.Charset:
-				if opt.ChangedUs && opt.EnabledForUs() {
-					p.charset.RequestEncoding(unicode.UTF8)
-				}
-			}
-		}
-		return nil
-	})
+	conn := telnet.Wrap(context.Background(), tcp)
+	p.session = newSession(conn, logger.With().
+		Str("server", conn.RemoteAddr().String()).
+		Logger())
 	go p.runForever()
 	return nil
 }
 
-func (p *proxy) AddDownstream(w io.WriteCloser) {
+func (p *upstreamSession) AddDownstream(w io.WriteCloser) {
 	p.mux.Lock()
 	defer p.mux.Unlock()
 	p.downstream = append(p.downstream, w)
 }
 
-func (p *proxy) Close() error {
+func (p *upstreamSession) Close() error {
 	p.Conn.Close()
 	for _, w := range p.downstream {
 		w.Close()
@@ -129,7 +122,7 @@ func (p *proxy) Close() error {
 
 const proxyBufSize = 4096
 
-func (p *proxy) runForever() {
+func (p *upstreamSession) runForever() {
 	defer p.Close()
 	p.logger.Debug().Msg("connected")
 	ctx := p.Context()
@@ -149,7 +142,7 @@ func (p *proxy) runForever() {
 	p.logger.Debug().Msg("disconnected")
 }
 
-func (p *proxy) sendDownstream(buf []byte) {
+func (p *upstreamSession) sendDownstream(buf []byte) {
 	p.mux.Lock()
 	defer p.mux.Unlock()
 	for _, w := range p.downstream {

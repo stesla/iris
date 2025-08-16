@@ -21,9 +21,9 @@ const (
 	KeyLogger contextKey = "logger"
 )
 
-func main() {
-	logger := zerolog.New(os.Stdout)
+var logger = zerolog.New(os.Stdout)
 
+func main() {
 	l, err := net.Listen("tcp", *addr)
 	if err != nil {
 		logger.Fatal().Err(err).Send()
@@ -42,7 +42,7 @@ func main() {
 		conn := telnet.Wrap(ctx, tcp)
 		go func() {
 			defer conn.Close()
-			session := newSession(conn, logger)
+			session := newDownstreamSession(conn)
 			session.runForever()
 		}()
 	}
