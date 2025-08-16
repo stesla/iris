@@ -135,19 +135,23 @@ func (s *downstreamSession) findUpstream() (*upstreamSession, error) {
 			if upstream == nil {
 				return nil, errors.New("you must select an upstream to connect")
 			}
-			upstream.AddDownstream(s)
-			if upstream.IsNew() {
-				addr := strings.TrimSpace(rest)
-				fmt.Fprintf(s, "connecting to %v...", addr)
-				if err := upstream.Initialize(addr, buf.Bytes()); err != nil {
-					return upstream, fmt.Errorf("error connecting (%v): %w", addr, err)
-				}
+			addr := strings.TrimSpace(rest)
+			fmt.Fprintf(s, "connecting to %v...", addr)
+			if err := upstream.Connect(addr); err != nil {
+				return upstream, fmt.Errorf("error connecting (%v): %w", addr, err)
+			}
+			if _, err := upstream.Write(buf.Bytes()); err != nil {
+				return upstream, fmt.Errorf("error writing to (%v): %w", addr, err)
 			}
 			return upstream, nil
 		case "send":
 			fmt.Fprintln(&buf, rest)
 		case "upstream":
 			upstream = sessionForKey(rest)
+			upstream.AddDownstream(s)
+			if upstream.IsConnected() {
+				return upstream, nil
+			}
 		default:
 			fmt.Fprintln(s, "unrecognized command:", s.Text())
 		}
@@ -180,7 +184,7 @@ type upstreamSession struct {
 	downstream []io.WriteCloser
 }
 
-func (s *upstreamSession) Initialize(addr string, toSend []byte) error {
+func (s *upstreamSession) Connect(addr string) error {
 	tcp, err := net.Dial("tcp", addr)
 	if err != nil {
 		return err
@@ -189,9 +193,6 @@ func (s *upstreamSession) Initialize(addr string, toSend []byte) error {
 	s.session = newSession(conn, logger.With().
 		Str("server", conn.RemoteAddr().String()).
 		Logger())
-	if _, err := s.Write(toSend); err != nil {
-		return err
-	}
 	go s.runForever()
 	return nil
 }
@@ -210,8 +211,8 @@ func (s *upstreamSession) Close() error {
 	return nil
 }
 
-func (s *upstreamSession) IsNew() bool {
-	return s.session == nil
+func (s *upstreamSession) IsConnected() bool {
+	return s.session != nil
 }
 
 func (s *upstreamSession) runForever() {
