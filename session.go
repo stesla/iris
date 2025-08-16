@@ -47,6 +47,18 @@ func (s *session) handleEvent(_ context.Context, ev event.Event) error {
 	return nil
 }
 
+func (s *session) negotiateOptions() {
+	opts := []byte{
+		telnet.SuppressGoAhead,
+		telnet.EndOfRecord,
+		telnet.TransmitBinary,
+		telnet.Charset,
+	}
+	for _, opt := range opts {
+		s.GetOption(opt).Allow(true, true).EnableBoth(s.Context())
+	}
+}
+
 type downstreamSession struct {
 	*session
 	*bufio.Scanner
@@ -65,10 +77,7 @@ func newDownstreamSession(conn telnet.Conn) *downstreamSession {
 
 func (s *downstreamSession) runForever() {
 	s.logger.Debug().Msg("connected")
-	s.GetOption(telnet.SuppressGoAhead).Allow(true, true).EnableBoth(s.Context())
-	s.GetOption(telnet.EndOfRecord).Allow(true, true).EnableBoth(s.Context())
-	s.GetOption(telnet.TransmitBinary).Allow(true, true).EnableBoth(s.Context())
-	s.GetOption(telnet.Charset).Allow(true, true).EnableBoth(s.Context())
+	s.negotiateOptions()
 	for s.Scan() {
 		switch command, rest, _ := strings.Cut(s.Text(), " "); command {
 		case "connect":
@@ -93,28 +102,28 @@ type upstreamSession struct {
 	downstream []io.WriteCloser
 }
 
-func (p *upstreamSession) Initialize(addr string) error {
+func (s *upstreamSession) Initialize(addr string) error {
 	tcp, err := net.Dial("tcp", addr)
 	if err != nil {
 		return err
 	}
 	conn := telnet.Wrap(context.Background(), tcp)
-	p.session = newSession(conn, logger.With().
+	s.session = newSession(conn, logger.With().
 		Str("server", conn.RemoteAddr().String()).
 		Logger())
-	go p.runForever()
+	go s.runForever()
 	return nil
 }
 
-func (p *upstreamSession) AddDownstream(w io.WriteCloser) {
-	p.mux.Lock()
-	defer p.mux.Unlock()
-	p.downstream = append(p.downstream, w)
+func (s *upstreamSession) AddDownstream(w io.WriteCloser) {
+	s.mux.Lock()
+	defer s.mux.Unlock()
+	s.downstream = append(s.downstream, w)
 }
 
-func (p *upstreamSession) Close() error {
-	p.Conn.Close()
-	for _, w := range p.downstream {
+func (s *upstreamSession) Close() error {
+	s.Conn.Close()
+	for _, w := range s.downstream {
 		w.Close()
 	}
 	return nil
@@ -122,30 +131,26 @@ func (p *upstreamSession) Close() error {
 
 const proxyBufSize = 4096
 
-func (p *upstreamSession) runForever() {
-	defer p.Close()
-	p.logger.Debug().Msg("connected")
-	ctx := p.Context()
-	p.GetOption(telnet.SuppressGoAhead).Allow(true, true).EnableBoth(ctx)
-	p.GetOption(telnet.EndOfRecord).Allow(true, true).EnableBoth(ctx)
-	p.GetOption(telnet.TransmitBinary).Allow(true, true).EnableBoth(ctx)
-	p.GetOption(telnet.Charset).Allow(true, true).EnableBoth(ctx)
+func (s *upstreamSession) runForever() {
+	defer s.Close()
+	s.logger.Debug().Msg("connected")
+	s.negotiateOptions()
 	for {
 		var buf = make([]byte, proxyBufSize)
-		n, err := p.Read(buf)
+		n, err := s.Read(buf)
 		if err != nil {
 			break
 		}
 		buf = buf[:n]
-		p.sendDownstream(buf)
+		s.sendDownstream(buf)
 	}
-	p.logger.Debug().Msg("disconnected")
+	s.logger.Debug().Msg("disconnected")
 }
 
-func (p *upstreamSession) sendDownstream(buf []byte) {
-	p.mux.Lock()
-	defer p.mux.Unlock()
-	for _, w := range p.downstream {
+func (s *upstreamSession) sendDownstream(buf []byte) {
+	s.mux.Lock()
+	defer s.mux.Unlock()
+	for _, w := range s.downstream {
 		w.Write(buf)
 	}
 }
