@@ -180,6 +180,13 @@ func TestSuppressGoAhead(t *testing.T) {
 	_, err := telnet.Write([]byte("xyzzy"))
 	require.NoError(t, err)
 	require.Equal(t, []byte("xyzzy"), output.Bytes())
+
+	telnet.options.set(&optionState{opt: SuppressGoAhead, us: qNo})
+	telnet.SuppressGoAhead(true)
+	output.Reset()
+	_, err = telnet.Write([]byte("xyzzy"))
+	require.NoError(t, err)
+	require.Equal(t, []byte("xyzzy"), output.Bytes())
 }
 
 func TestEndOfRecord(t *testing.T) {

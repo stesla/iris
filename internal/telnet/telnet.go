@@ -17,16 +17,19 @@ type Conn interface {
 	Context() context.Context
 	GetOption(byte) OptionState
 	RegisterHandler(Handler)
+	SuppressGoAhead(bool)
 }
 
 type conn struct {
 	net.Conn
 	event.Dispatcher
 
-	ctx               context.Context
-	options           OptionMap
-	readNoEnc, read   io.Reader
-	writeNoEnc, write io.Writer
+	ctx        context.Context
+	options    OptionMap
+	readNoEnc  *reader
+	read       io.Reader
+	writeNoEnc *writer
+	write      io.Writer
 }
 
 func Wrap(ctx context.Context, c net.Conn) Conn {
@@ -112,6 +115,10 @@ func (c *conn) SetReadEncoding(enc encoding.Encoding) {
 
 func (c *conn) SetWriteEncoding(enc encoding.Encoding) {
 	c.write = enc.NewEncoder().Writer(c.writeNoEnc)
+}
+
+func (c *conn) SuppressGoAhead(value bool) {
+	c.writeNoEnc.suppressGoAhead = value
 }
 
 func (c *conn) Write(p []byte) (n int, err error) {
@@ -218,8 +225,9 @@ func (r *reader) Read(p []byte) (n int, err error) {
 }
 
 type writer struct {
-	out io.Writer
-	ctx context.Context
+	out             io.Writer
+	ctx             context.Context
+	suppressGoAhead bool
 }
 
 func (w *writer) Write(p []byte) (n int, err error) {
@@ -252,5 +260,5 @@ func (w *writer) shouldSendEndOfRecord() bool {
 }
 
 func (w *writer) shouldSendGoAhead() bool {
-	return !getOption(w.ctx, SuppressGoAhead).EnabledForUs()
+	return !(w.suppressGoAhead || getOption(w.ctx, SuppressGoAhead).EnabledForUs())
 }
