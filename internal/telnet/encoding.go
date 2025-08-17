@@ -73,7 +73,8 @@ func (h *TransmitBinaryHandler) Listen(ctx context.Context, ev event.Event) erro
 }
 
 type CharsetHandler struct {
-	IsServer bool
+	AllowWithoutTransmitBinary bool
+	IsServer                   bool
 
 	ctx                context.Context
 	enc                encoding.Encoding
@@ -124,14 +125,14 @@ func (h *CharsetHandler) Listen(ctx context.Context, ev event.Event) error {
 	case CharsetData:
 		h.enc = t.Encoding
 		opt := getOption(ctx, TransmitBinary)
-		if them, us := opt.EnabledForThem(), opt.EnabledForUs(); them && us {
+		if h.shouldSetEncoding(opt) {
 			setEncoding(ctx, h.enc)
 		}
 	case OptionData:
 		switch t.Option() {
 		case TransmitBinary:
 			if h.enc != nil {
-				if them, us := t.EnabledForThem(), t.EnabledForUs(); them && us {
+				if h.shouldSetEncoding(t) {
 					setEncoding(ctx, h.enc)
 				} else {
 					setEncoding(ctx, ASCII)
@@ -159,6 +160,11 @@ func (h *CharsetHandler) Listen(ctx context.Context, ev event.Event) error {
 		}
 	}
 	return nil
+}
+
+func (h *CharsetHandler) shouldSetEncoding(opt OptionState) bool {
+	them, us := opt.EnabledForThem(), opt.EnabledForUs()
+	return h.AllowWithoutTransmitBinary || (them && us)
 }
 
 func (h *CharsetHandler) handleCharsetRequest(ctx context.Context, data []byte) error {

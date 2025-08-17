@@ -272,42 +272,56 @@ func TestCharsetSetsEncoding(t *testing.T) {
 	ctx = context.WithValue(ctx, KeyOptionMap, options)
 	ctx = context.WithValue(ctx, KeyEncodable, encodable)
 	tests := []struct {
-		events                            []event.Event
-		expectedReadEnc, expectedWriteEnc encoding.Encoding
+		init              func(*CharsetHandler)
+		events            []event.Event
+		readEnc, writeEnc encoding.Encoding
 	}{
-		{[]event.Event{
+		{events: []event.Event{
 			{Name: EventCharsetAccepted, Data: CharsetData{Encoding: unicoding.UTF8}},
-		}, nil, nil},
-		{[]event.Event{
+		}, readEnc: nil, writeEnc: nil},
+		{
+			init: func(h *CharsetHandler) {
+				h.AllowWithoutTransmitBinary = true
+			},
+			events: []event.Event{
+				{Name: EventCharsetAccepted, Data: CharsetData{Encoding: unicoding.UTF8}},
+			},
+			readEnc:  unicoding.UTF8,
+			writeEnc: unicoding.UTF8,
+		},
+		{events: []event.Event{
 			{Name: EventCharsetAccepted, Data: CharsetData{Encoding: unicoding.UTF8}},
 			{Name: EventOption, Data: OptionData{OptionState: &optionState{opt: TransmitBinary, them: qYes, us: qYes}, ChangedThem: true, ChangedUs: true}},
-		}, unicoding.UTF8, unicoding.UTF8},
-		{[]event.Event{
+		}, readEnc: unicoding.UTF8, writeEnc: unicoding.UTF8},
+		{events: []event.Event{
 			{Name: EventOption, Data: OptionData{OptionState: &optionState{opt: TransmitBinary, them: qYes, us: qYes}, ChangedThem: true, ChangedUs: true}},
 			{Name: EventCharsetAccepted, Data: CharsetData{Encoding: unicoding.UTF8}},
-		}, unicoding.UTF8, unicoding.UTF8},
-		{[]event.Event{
+		}, readEnc: unicoding.UTF8, writeEnc: unicoding.UTF8},
+		{events: []event.Event{
 			{Name: EventOption, Data: OptionData{OptionState: &optionState{opt: TransmitBinary, them: qYes, us: qYes}, ChangedThem: true, ChangedUs: true}},
 			{Name: EventCharsetAccepted, Data: CharsetData{Encoding: unicoding.UTF8}},
 			{Name: EventOption, Data: OptionData{OptionState: &optionState{opt: TransmitBinary, them: qYes, us: qNo}, ChangedThem: false, ChangedUs: true}},
-		}, ASCII, ASCII},
-		{[]event.Event{
+		}, readEnc: ASCII, writeEnc: ASCII},
+		{events: []event.Event{
 			{Name: EventOption, Data: OptionData{OptionState: &optionState{opt: TransmitBinary, them: qYes, us: qYes}, ChangedThem: true, ChangedUs: true}},
 			{Name: EventCharsetAccepted, Data: CharsetData{Encoding: unicoding.UTF8}},
 			{Name: EventOption, Data: OptionData{OptionState: &optionState{opt: TransmitBinary, them: qNo, us: qYes}, ChangedThem: true, ChangedUs: false}},
-		}, ASCII, ASCII},
+		}, readEnc: ASCII, writeEnc: ASCII},
 	}
 	for _, test := range tests {
 		options.set(&optionState{opt: TransmitBinary})
 		h := &CharsetHandler{}
+		if test.init != nil {
+			test.init(h)
+		}
 		*encodable = mockEncodable{t: t}
 		h.Register(ctx)
 		for _, event := range test.events {
 			err := dispatch(ctx, event)
 			require.NoError(t, err)
 		}
-		require.Equal(t, test.expectedReadEnc, encodable.readEnc)
-		require.Equal(t, test.expectedWriteEnc, encodable.writeEnc)
+		require.Equal(t, test.readEnc, encodable.readEnc)
+		require.Equal(t, test.writeEnc, encodable.writeEnc)
 	}
 }
 
