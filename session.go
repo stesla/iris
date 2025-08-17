@@ -8,8 +8,11 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"os"
+	"path"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/rs/zerolog"
 	"github.com/stesla/iris/internal/event"
@@ -128,9 +131,6 @@ func (s *downstreamSession) authenticate() bool {
 }
 
 func (s *downstreamSession) connectNewUpstream(rest string, buf bytes.Buffer) error {
-	if s.upstream == nil {
-		return errors.New("you must select an upstream to connect")
-	}
 	addr := strings.TrimSpace(rest)
 	fmt.Fprintf(s, "connecting to %v...", addr)
 	if err := s.upstream.Connect(addr); err != nil {
@@ -147,6 +147,9 @@ func (s *downstreamSession) findUpstream() error {
 	for s.Scan() {
 		switch command, rest, _ := strings.Cut(s.Text(), " "); command {
 		case "connect":
+			if s.upstream == nil {
+				return errors.New("you must select an upstream to connect")
+			}
 			return s.connectNewUpstream(rest, buf)
 		case "send":
 			fmt.Fprintln(&buf, rest)
@@ -154,7 +157,8 @@ func (s *downstreamSession) findUpstream() error {
 			s.upstream = sessionForKey(rest)
 			s.upstream.AddDownstream(s)
 			if s.upstream.IsConnected() {
-				return nil
+				_, err := s.upstream.history.WriteTo(s)
+				return err
 			}
 		default:
 			fmt.Fprintln(s, "unrecognized command:", s.Text())
@@ -186,9 +190,16 @@ type upstreamSession struct {
 	key        string
 	mux        sync.Mutex
 	downstream []io.WriteCloser
+	history    History
 }
 
-func (s *upstreamSession) Connect(addr string) error {
+func (s *upstreamSession) Connect(addr string) (err error) {
+	s.history, err = newHistory(s.key)
+	if err != nil {
+		return
+	}
+	s.AddDownstream(s.history)
+
 	tcp, err := net.Dial("tcp", addr)
 	if err != nil {
 		return err
@@ -242,4 +253,89 @@ func (s *upstreamSession) sendDownstream(buf []byte) {
 	for _, w := range s.downstream {
 		w.Write(buf)
 	}
+}
+
+type History interface {
+	io.WriteCloser
+	io.WriterTo
+}
+
+const defaultHistorySize = 20 * 1024 // about 256 lines of text
+const logTimeFormat = "2006-01-02 15:04:05 -0700 MST"
+const logSeperator = "--------------- %s - %s ---------------\n"
+const logSepOpened = "--------------- opened"
+
+func newHistory(key string) (History, error) {
+	log := &logFile{key: key, historySize: defaultHistorySize}
+	if err := log.Open(); err != nil {
+		return nil, fmt.Errorf("error opening log for key (%v): %w", key, err)
+	}
+	return log, nil
+}
+
+type logFile struct {
+	*os.File
+	key         string
+	historySize int64
+}
+
+func (f *logFile) Open() (err error) {
+	logFileName := path.Join(
+		*logdir,
+		fmt.Sprintf("%s-%s.log", time.Now().Format("2006-01-02"), f.key),
+	)
+	f.File, err = os.OpenFile(
+		logFileName,
+		os.O_APPEND|os.O_CREATE|os.O_WRONLY,
+		0644,
+	)
+	if err == nil {
+		t := time.Now()
+		fmt.Fprintf(f, logSeperator, "opened", t.Format(logTimeFormat))
+	}
+	return
+}
+
+func (f *logFile) Close() (err error) {
+	t := time.Now()
+	fmt.Fprintf(f, logSeperator, "closed", t.Format(logTimeFormat))
+	return f.File.Close()
+}
+
+func (f *logFile) WriteTo(w io.Writer) (int64, error) {
+	if f.File == nil {
+		return 0, errors.New("log file not open")
+	}
+	file, err := os.Open(f.Name())
+	if err != nil {
+		return 0, err
+	}
+	defer file.Close()
+	end, err := file.Seek(0, io.SeekEnd)
+	if err != nil {
+		return 0, err
+	}
+	_, err = file.Seek(0, io.SeekStart)
+	if err != nil {
+		return 0, err
+	}
+	if end > f.historySize {
+		_, err = file.Seek(end-f.historySize, io.SeekCurrent)
+		if err != nil {
+			return 0, err
+		}
+	}
+	buf := make([]byte, f.historySize)
+	n, err := file.Read(buf)
+	if err != nil && err != io.EOF {
+		return 0, err
+	}
+	buf = buf[:n]
+	if n = bytes.LastIndex(buf, []byte(logSepOpened)); n > 0 {
+		buf = buf[n:]
+		n = bytes.IndexByte(buf, '\n')
+		buf = buf[n+1:]
+	}
+	n, err = w.Write(buf)
+	return int64(n), err
 }

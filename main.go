@@ -12,6 +12,7 @@ import (
 var (
 	addr     = flag.String("addr", getEnvDefault("IRIS_ADDR", ":4001"), "address on which to listen")
 	password = flag.String("password", os.Getenv("IRIS_PASSWORD"), "password for server access")
+	logdir   = flag.String("logdir", getEnvDefault("IRIS_LOG_DIR", "./logs"), "logs get saved in this directory")
 )
 
 func main() {
