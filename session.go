@@ -27,6 +27,25 @@ var (
 	sessions      = make(map[string]*upstreamSession)
 )
 
+func CloseAllSessions() {
+	sessionsMutex.Lock()
+	defer sessionsMutex.Unlock()
+	for _, session := range sessions {
+		session.Close()
+	}
+}
+
+func ReopenHistories() {
+	sessionsMutex.Lock()
+	defer sessionsMutex.Unlock()
+	for _, session := range sessions {
+		if err := session.history.Reopen(); err != nil {
+			session.Close()
+			logger.Error().Err(err).Str("session-key", session.key).Msg("error reloading history")
+		}
+	}
+}
+
 func sessionForKey(key string) *upstreamSession {
 	sessionsMutex.Lock()
 	defer sessionsMutex.Unlock()
@@ -258,6 +277,7 @@ func (s *upstreamSession) sendDownstream(buf []byte) {
 type History interface {
 	io.WriteCloser
 	io.WriterTo
+	Reopen() error
 }
 
 const defaultHistorySize = 20 * 1024 // about 256 lines of text
@@ -300,6 +320,13 @@ func (f *logFile) Close() (err error) {
 	t := time.Now()
 	fmt.Fprintf(f, logSeperator, "closed", t.Format(logTimeFormat))
 	return f.File.Close()
+}
+
+func (f *logFile) Reopen() (err error) {
+	if err = f.Close(); err != nil {
+		return
+	}
+	return f.Open()
 }
 
 func (f *logFile) WriteTo(w io.Writer) (int64, error) {
