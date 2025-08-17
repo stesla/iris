@@ -23,22 +23,22 @@ import (
 const readBufSize = 4096
 
 var (
-	sessionsMutex sync.Mutex
-	sessions      = make(map[string]*upstreamSession)
+	upstreamsMutex sync.Mutex
+	upstreams      = make(map[string]*upstreamSession)
 )
 
 func CloseAllSessions() {
-	sessionsMutex.Lock()
-	defer sessionsMutex.Unlock()
-	for _, session := range sessions {
+	upstreamsMutex.Lock()
+	defer upstreamsMutex.Unlock()
+	for _, session := range upstreams {
 		session.Close()
 	}
 }
 
 func ReopenHistories() {
-	sessionsMutex.Lock()
-	defer sessionsMutex.Unlock()
-	for _, session := range sessions {
+	upstreamsMutex.Lock()
+	defer upstreamsMutex.Unlock()
+	for _, session := range upstreams {
 		if err := session.history.Reopen(); err != nil {
 			session.Close()
 			logger.Error().Err(err).Str("session-key", session.key).Msg("error reloading history")
@@ -46,31 +46,31 @@ func ReopenHistories() {
 	}
 }
 
-func sessionForKey(key string) *upstreamSession {
-	sessionsMutex.Lock()
-	defer sessionsMutex.Unlock()
-	if _, found := sessions[key]; !found {
-		sessions[key] = &upstreamSession{key: key}
+func upstreamForKey(key string) *upstreamSession {
+	upstreamsMutex.Lock()
+	defer upstreamsMutex.Unlock()
+	if _, found := upstreams[key]; !found {
+		upstreams[key] = &upstreamSession{key: key}
 	}
-	return sessions[key]
+	return upstreams[key]
 }
 
-func deleteSessionWithKey(key string) {
-	sessionsMutex.Lock()
-	defer sessionsMutex.Unlock()
-	delete(sessions, key)
+func deleteUpstreamWithKey(key string) {
+	upstreamsMutex.Lock()
+	defer upstreamsMutex.Unlock()
+	delete(upstreams, key)
 }
 
-type session struct {
+type telnetSession struct {
 	conn           telnet.Conn
 	logger         zerolog.Logger
 	charset        telnet.CharsetHandler
 	transmitBinary telnet.TransmitBinaryHandler
 }
 
-func newSession(conn telnet.Conn, logger zerolog.Logger) *session {
-	s := &session{
-		conn:   conn,
+func newSession(conn net.Conn, logger zerolog.Logger) *telnetSession {
+	s := &telnetSession{
+		conn:   telnet.Wrap(context.Background(), conn),
 		logger: logger,
 	}
 	s.conn.RegisterHandler(LogHandler{Logger: s.logger})
@@ -80,27 +80,27 @@ func newSession(conn telnet.Conn, logger zerolog.Logger) *session {
 	return s
 }
 
-func (s *session) Close() error {
+func (s *telnetSession) Close() error {
 	return s.conn.Close()
 }
 
-func (s *session) Context() context.Context {
+func (s *telnetSession) Context() context.Context {
 	return s.conn.Context()
 }
 
-func (s *session) GetOption(opt byte) telnet.OptionState {
+func (s *telnetSession) GetOption(opt byte) telnet.OptionState {
 	return s.conn.GetOption(opt)
 }
 
-func (s *session) Read(p []byte) (n int, err error) {
+func (s *telnetSession) Read(p []byte) (n int, err error) {
 	return s.conn.Read(p)
 }
 
-func (s *session) Write(p []byte) (n int, err error) {
+func (s *telnetSession) Write(p []byte) (n int, err error) {
 	return s.conn.Write(p)
 }
 
-func (s *session) handleEvent(_ context.Context, ev event.Event) error {
+func (s *telnetSession) handleEvent(_ context.Context, ev event.Event) error {
 	switch opt := ev.Data.(type) {
 	case telnet.OptionData:
 		switch opt.Option() {
@@ -113,7 +113,7 @@ func (s *session) handleEvent(_ context.Context, ev event.Event) error {
 	return nil
 }
 
-func (s *session) negotiateOptions() {
+func (s *telnetSession) negotiateOptions() {
 	opts := []byte{
 		telnet.SuppressGoAhead,
 		telnet.EndOfRecord,
@@ -126,16 +126,18 @@ func (s *session) negotiateOptions() {
 }
 
 type downstreamSession struct {
-	*session
+	*telnetSession
 	*bufio.Scanner
 	upstream *upstreamSession
 }
 
-func newDownstreamSession(conn telnet.Conn) *downstreamSession {
+func newDownstreamSession(conn net.Conn) *downstreamSession {
 	result := &downstreamSession{
-		session: newSession(conn, logger.With().
-			Str("client", conn.RemoteAddr().String()).
-			Logger()),
+		telnetSession: newSession(
+			telnet.Wrap(context.Background(), conn),
+			logger.With().
+				Str("client", conn.RemoteAddr().String()).
+				Logger()),
 		Scanner: bufio.NewScanner(conn),
 	}
 	result.charset.IsServer = true
@@ -173,7 +175,7 @@ func (s *downstreamSession) findUpstream() error {
 		case "send":
 			fmt.Fprintln(&buf, rest)
 		case "upstream":
-			s.upstream = sessionForKey(rest)
+			s.upstream = upstreamForKey(rest)
 			s.upstream.AddDownstream(s)
 			if s.upstream.IsConnected() {
 				_, err := s.upstream.history.WriteTo(s)
@@ -205,7 +207,7 @@ func (s *downstreamSession) runForever() {
 }
 
 type upstreamSession struct {
-	*session
+	*telnetSession
 	key        string
 	mux        sync.Mutex
 	downstream []io.WriteCloser
@@ -223,9 +225,8 @@ func (s *upstreamSession) Connect(addr string) (err error) {
 	if err != nil {
 		return err
 	}
-	conn := telnet.Wrap(context.Background(), tcp)
-	s.session = newSession(conn, logger.With().
-		Str("server", conn.RemoteAddr().String()).
+	s.telnetSession = newSession(tcp, logger.With().
+		Str("server", tcp.RemoteAddr().String()).
 		Logger())
 	go s.runForever()
 	return nil
@@ -246,11 +247,11 @@ func (s *upstreamSession) Close() error {
 }
 
 func (s *upstreamSession) IsConnected() bool {
-	return s.session != nil
+	return s.telnetSession != nil
 }
 
 func (s *upstreamSession) runForever() {
-	defer deleteSessionWithKey(s.key)
+	defer deleteUpstreamWithKey(s.key)
 	defer s.Close()
 	s.logger.Debug().Msg("connected")
 	s.negotiateOptions()

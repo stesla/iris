@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"flag"
 	"net"
 	"os"
@@ -9,7 +8,6 @@ import (
 	"syscall"
 
 	"github.com/rs/zerolog"
-	"github.com/stesla/iris/internal/telnet"
 )
 
 var (
@@ -79,11 +77,9 @@ loop:
 		case <-chExit:
 			break loop
 		case tcp := <-chAccept:
-			ctx := context.Background()
-			conn := telnet.Wrap(ctx, tcp)
 			go func() {
-				defer conn.Close()
-				session := newDownstreamSession(conn)
+				session := newDownstreamSession(tcp)
+				defer session.Close()
 				session.runForever()
 			}()
 		}
