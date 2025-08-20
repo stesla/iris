@@ -133,11 +133,9 @@ type downstreamSession struct {
 
 func newDownstreamSession(conn net.Conn) *downstreamSession {
 	result := &downstreamSession{
-		telnetSession: newSession(
-			telnet.Wrap(context.Background(), conn),
-			logger.With().
-				Str("client", conn.RemoteAddr().String()).
-				Logger()),
+		telnetSession: newSession(conn, logger.With().
+			Str("client", conn.RemoteAddr().String()).
+			Logger()),
 		Scanner: bufio.NewScanner(conn),
 	}
 	result.charset.IsServer = true
