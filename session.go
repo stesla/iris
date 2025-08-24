@@ -10,6 +10,7 @@ import (
 	"net"
 	"os"
 	"path"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -50,7 +51,10 @@ func upstreamForKey(key string) *upstreamSession {
 	upstreamsMutex.Lock()
 	defer upstreamsMutex.Unlock()
 	if _, found := upstreams[key]; !found {
-		upstreams[key] = &upstreamSession{key: key}
+		upstreams[key] = &upstreamSession{
+			key:        key,
+			dispatcher: event.NewDispatcher(),
+		}
 	}
 	return upstreams[key]
 }
@@ -166,10 +170,12 @@ func (s *downstreamSession) findUpstream() error {
 	for s.Scan() {
 		switch command, rest, _ := strings.Cut(s.Text(), " "); command {
 		case "connect":
-			if s.upstream == nil {
-				return errors.New("you must select an upstream to connect")
-			}
 			return s.connectNewUpstream(rest, buf)
+		case "option":
+			option, value, _ := strings.Cut(rest, " ")
+			if err := s.upstream.setOption(option, value); err != nil {
+				return err
+			}
 		case "send":
 			fmt.Fprintln(&buf, rest)
 		case "upstream":
@@ -210,9 +216,15 @@ type upstreamSession struct {
 	mux        sync.Mutex
 	downstream []io.WriteCloser
 	history    History
+	dispatcher event.Dispatcher
 }
 
+const EventConnectUpstream event.Name = "upstream.connect"
+
 func (s *upstreamSession) Connect(addr string) (err error) {
+	if s == nil {
+		return errors.New("you must select an upstream to connect")
+	}
 	s.history, err = newHistory(s.key)
 	if err != nil {
 		return
@@ -226,6 +238,10 @@ func (s *upstreamSession) Connect(addr string) (err error) {
 	s.telnetSession = newSession(tcp, logger.With().
 		Str("server", tcp.RemoteAddr().String()).
 		Logger())
+	s.dispatcher.Dispatch(s.Context(), event.Event{
+		Name: EventConnectUpstream,
+		Data: s,
+	})
 	go s.runForever()
 	return nil
 }
@@ -271,6 +287,34 @@ func (s *upstreamSession) sendDownstream(buf []byte) {
 	for _, w := range s.downstream {
 		w.Write(buf)
 	}
+}
+
+func (s *upstreamSession) setOption(optionName, optionValue string) error {
+	if s == nil {
+		return errors.New("you must select an upstream to set options")
+	}
+	switch optionName {
+	case "always_allow_charset":
+		value, err := strconv.ParseBool(optionValue)
+		if err != nil {
+			return err
+		}
+		s.dispatcher.ListenFunc(EventConnectUpstream, func(context.Context, event.Event) error {
+			s.telnetSession.charset.AllowWithoutTransmitBinary = value
+			return nil
+		})
+	case "force_suppress_go_ahead":
+		value, err := strconv.ParseBool(optionValue)
+		if err != nil {
+			return err
+		}
+		s.dispatcher.ListenFunc(EventConnectUpstream, func(context.Context, event.Event) error {
+			s.telnetSession.conn.SuppressGoAhead(value)
+			return nil
+		})
+
+	}
+	return nil
 }
 
 type History interface {
