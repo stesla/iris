@@ -140,9 +140,9 @@ func newDownstreamSession(conn net.Conn) *downstreamSession {
 		telnetSession: newSession(conn, logger.With().
 			Str("client", conn.RemoteAddr().String()).
 			Logger()),
-		Scanner: bufio.NewScanner(conn),
 	}
 	result.charset.IsServer = true
+	result.Scanner = bufio.NewScanner(result)
 	return result
 }
 
