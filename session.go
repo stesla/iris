@@ -70,17 +70,21 @@ type telnetSession struct {
 	logger         zerolog.Logger
 	charset        telnet.CharsetHandler
 	transmitBinary telnet.TransmitBinaryHandler
+	dispatcher     event.Dispatcher
 }
 
 func newSession(conn net.Conn, logger zerolog.Logger) *telnetSession {
 	s := &telnetSession{
-		conn:   telnet.Wrap(context.Background(), conn),
-		logger: logger,
+		conn:       telnet.Wrap(context.Background(), conn),
+		logger:     logger,
+		dispatcher: event.NewDispatcher(),
 	}
 	s.conn.RegisterHandler(LogHandler{Logger: s.logger})
 	s.conn.RegisterHandler(&s.transmitBinary)
 	s.conn.RegisterHandler(&s.charset)
-	s.conn.ListenFunc(telnet.EventOption, s.handleEvent)
+	s.conn.Listen(telnet.EventOption, s)
+	s.conn.Listen(telnet.EventCharsetAccepted, s)
+	s.conn.Listen(telnet.EventCharsetRejected, s)
 	return s
 }
 
@@ -104,15 +108,22 @@ func (s *telnetSession) Write(p []byte) (n int, err error) {
 	return s.conn.Write(p)
 }
 
-func (s *telnetSession) handleEvent(_ context.Context, ev event.Event) error {
-	switch opt := ev.Data.(type) {
-	case telnet.OptionData:
+func (s *telnetSession) Listen(_ context.Context, ev event.Event) error {
+	switch ev.Name {
+	case telnet.EventOption:
+		opt := ev.Data.(telnet.OptionData)
 		switch opt.Option() {
 		case telnet.Charset:
-			if opt.ResolvedUs && opt.EnabledForUs() {
-				s.charset.RequestEncoding(unicode.UTF8)
+			if opt.ResolvedUs {
+				if opt.EnabledForUs() {
+					s.charset.RequestEncoding(unicode.UTF8)
+				} else {
+					s.dispatcher.Dispatch(context.Background(), event.Event{Name: EventCharsetResolved})
+				}
 			}
 		}
+	case telnet.EventCharsetAccepted, telnet.EventCharsetRejected:
+		s.dispatcher.Dispatch(context.Background(), event.Event{Name: EventCharsetResolved})
 	}
 	return nil
 }
@@ -144,6 +155,18 @@ func newDownstreamSession(conn net.Conn) *downstreamSession {
 	result.charset.IsServer = true
 	result.Scanner = bufio.NewScanner(result)
 	return result
+}
+
+func (s *downstreamSession) Listen(_ context.Context, ev event.Event) error {
+	switch ev.Name {
+	case EventCharsetResolved:
+		go s.dispatcher.RemoveListener(EventCharsetResolved, s)
+		_, err := s.upstream.history.WriteTo(s)
+		if err != nil {
+			s.logger.Error().AnErr("error", err).Msg("error writing history")
+		}
+	}
+	return nil
 }
 
 func (s *downstreamSession) authenticate() bool {
@@ -182,8 +205,8 @@ func (s *downstreamSession) findUpstream() error {
 			s.upstream = upstreamForKey(rest)
 			s.upstream.AddDownstream(s)
 			if s.upstream.IsConnected() {
-				_, err := s.upstream.history.WriteTo(s)
-				return err
+				s.dispatcher.Listen(EventCharsetResolved, s)
+				return nil
 			}
 		default:
 			fmt.Fprintln(s, "unrecognized command:", s.Text())
@@ -193,6 +216,8 @@ func (s *downstreamSession) findUpstream() error {
 	// only happen if the client disconnected
 	return io.EOF
 }
+
+const EventCharsetResolved = "charset.resolved"
 
 func (s *downstreamSession) runForever() {
 	s.logger.Debug().Msg("connected")
