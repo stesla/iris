@@ -14,8 +14,8 @@ const EventOption event.Name = "telnet.option"
 
 type OptionData struct {
 	OptionState
-	ChangedThem bool
-	ChangedUs   bool
+	ResolvedThem bool
+	ResolvedUs   bool
 }
 
 const EventNegotation event.Name = "telnet.reader.negotiation"

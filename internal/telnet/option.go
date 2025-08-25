@@ -22,6 +22,7 @@ type OptionState interface {
 	EnabledForThem() bool
 	EnabledForUs() bool
 	Option() byte
+	Waiting() bool
 }
 
 type OptionMap interface {
@@ -133,6 +134,8 @@ func (o *optionState) EnabledForUs() bool       { return o.us == qYes }
 
 func (o *optionState) Option() byte { return o.opt }
 
+func (o *optionState) Waiting() bool { return o.them > qYes || o.us > qYes }
+
 func (o *optionState) disable(ctx context.Context, state *qState, b byte) {
 	switch *state {
 	case qNo:
@@ -227,11 +230,13 @@ func (o *optionState) receive(ctx context.Context, b byte) {
 			*state = qNo
 		}
 	}
-	if changedThem, changedUs := themBefore != o.them, usBefore != o.us; changedThem || changedUs {
+	resolvedThem := themBefore != o.them && o.them <= qYes
+	resolvedUs := usBefore != o.us && o.us <= qYes
+	if resolvedThem || resolvedUs {
 		dispatch(ctx, event.Event{Name: EventOption, Data: OptionData{
-			OptionState: o,
-			ChangedThem: changedThem,
-			ChangedUs:   changedUs,
+			OptionState:  o,
+			ResolvedThem: resolvedThem,
+			ResolvedUs:   resolvedUs,
 		}})
 	}
 

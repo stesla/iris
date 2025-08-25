@@ -43,7 +43,7 @@ func TestTransmitBinary(t *testing.T) {
 	telnet.RegisterHandler(handler)
 	dispatch(telnet.Context(), event.Event{
 		Name: EventOption,
-		Data: OptionData{OptionState: &optionState{opt: TransmitBinary, them: qYes, us: qYes}, ChangedThem: true, ChangedUs: true},
+		Data: OptionData{OptionState: &optionState{opt: TransmitBinary, them: qYes, us: qYes}, ResolvedThem: true, ResolvedUs: true},
 	})
 	tcp.Reader = bytes.NewReader([]byte{128, 129, 255, 255})
 	output.Reset()
@@ -59,11 +59,11 @@ func TestTransmitBinary(t *testing.T) {
 
 	dispatch(telnet.Context(), event.Event{
 		Name: EventOption,
-		Data: OptionData{OptionState: &optionState{opt: TransmitBinary, them: qNo, us: qNo}, ChangedThem: true, ChangedUs: true},
+		Data: OptionData{OptionState: &optionState{opt: TransmitBinary, them: qNo, us: qNo}, ResolvedThem: true, ResolvedUs: true},
 	})
 	dispatch(telnet.Context(), event.Event{
 		Name: EventOption,
-		Data: OptionData{OptionState: &optionState{opt: SuppressGoAhead, them: qYes, us: qYes}, ChangedThem: true, ChangedUs: true},
+		Data: OptionData{OptionState: &optionState{opt: SuppressGoAhead, them: qYes, us: qYes}, ResolvedThem: true, ResolvedUs: true},
 	})
 	tcp.Reader = bytes.NewReader([]byte{128, 129, 255, 255})
 	output.Reset()
@@ -83,7 +83,7 @@ func TestTransmitBinary(t *testing.T) {
 
 	dispatch(telnet.Context(), event.Event{
 		Name: EventOption,
-		Data: OptionData{OptionState: &optionState{opt: TransmitBinary, them: qYes, us: qYes}, ChangedThem: true, ChangedUs: true},
+		Data: OptionData{OptionState: &optionState{opt: TransmitBinary, them: qYes, us: qYes}, ResolvedThem: true, ResolvedUs: true},
 	})
 
 	handler.Unregister()
@@ -174,22 +174,28 @@ func TestCharsetSubnegotiation(t *testing.T) {
 		},
 		{
 			init: func() {
+				require.False(t, charset.Waiting())
 				charset.RequestEncoding(unicoding.UTF8)
+				require.True(t, charset.Waiting())
 			},
 			data:  []byte{CharsetRejected},
 			event: event.Event{Name: EventCharsetRejected},
 			assert: func() {
 				require.Nil(t, charset.requestedEncodings)
+				require.False(t, charset.Waiting())
 			},
 		},
 		{
 			init: func() {
+				require.False(t, charset.Waiting())
 				charset.RequestEncoding(unicoding.UTF8)
+				require.True(t, charset.Waiting())
 			},
 			data:  append([]byte{CharsetAccepted}, "ISO-8859-1"...),
 			event: event.Event{Name: EventCharsetAccepted, Data: CharsetData{Encoding: charmap.ISO8859_1}},
 			assert: func() {
 				require.Nil(t, charset.requestedEncodings)
+				require.False(t, charset.Waiting())
 			},
 		},
 		{
@@ -291,21 +297,21 @@ func TestCharsetSetsEncoding(t *testing.T) {
 		},
 		{events: []event.Event{
 			{Name: EventCharsetAccepted, Data: CharsetData{Encoding: unicoding.UTF8}},
-			{Name: EventOption, Data: OptionData{OptionState: &optionState{opt: TransmitBinary, them: qYes, us: qYes}, ChangedThem: true, ChangedUs: true}},
+			{Name: EventOption, Data: OptionData{OptionState: &optionState{opt: TransmitBinary, them: qYes, us: qYes}, ResolvedThem: true, ResolvedUs: true}},
 		}, readEnc: unicoding.UTF8, writeEnc: unicoding.UTF8},
 		{events: []event.Event{
-			{Name: EventOption, Data: OptionData{OptionState: &optionState{opt: TransmitBinary, them: qYes, us: qYes}, ChangedThem: true, ChangedUs: true}},
+			{Name: EventOption, Data: OptionData{OptionState: &optionState{opt: TransmitBinary, them: qYes, us: qYes}, ResolvedThem: true, ResolvedUs: true}},
 			{Name: EventCharsetAccepted, Data: CharsetData{Encoding: unicoding.UTF8}},
 		}, readEnc: unicoding.UTF8, writeEnc: unicoding.UTF8},
 		{events: []event.Event{
-			{Name: EventOption, Data: OptionData{OptionState: &optionState{opt: TransmitBinary, them: qYes, us: qYes}, ChangedThem: true, ChangedUs: true}},
+			{Name: EventOption, Data: OptionData{OptionState: &optionState{opt: TransmitBinary, them: qYes, us: qYes}, ResolvedThem: true, ResolvedUs: true}},
 			{Name: EventCharsetAccepted, Data: CharsetData{Encoding: unicoding.UTF8}},
-			{Name: EventOption, Data: OptionData{OptionState: &optionState{opt: TransmitBinary, them: qYes, us: qNo}, ChangedThem: false, ChangedUs: true}},
+			{Name: EventOption, Data: OptionData{OptionState: &optionState{opt: TransmitBinary, them: qYes, us: qNo}, ResolvedThem: false, ResolvedUs: true}},
 		}, readEnc: ASCII, writeEnc: ASCII},
 		{events: []event.Event{
-			{Name: EventOption, Data: OptionData{OptionState: &optionState{opt: TransmitBinary, them: qYes, us: qYes}, ChangedThem: true, ChangedUs: true}},
+			{Name: EventOption, Data: OptionData{OptionState: &optionState{opt: TransmitBinary, them: qYes, us: qYes}, ResolvedThem: true, ResolvedUs: true}},
 			{Name: EventCharsetAccepted, Data: CharsetData{Encoding: unicoding.UTF8}},
-			{Name: EventOption, Data: OptionData{OptionState: &optionState{opt: TransmitBinary, them: qNo, us: qYes}, ChangedThem: true, ChangedUs: false}},
+			{Name: EventOption, Data: OptionData{OptionState: &optionState{opt: TransmitBinary, them: qNo, us: qYes}, ResolvedThem: true, ResolvedUs: false}},
 		}, readEnc: ASCII, writeEnc: ASCII},
 	}
 	for _, test := range tests {

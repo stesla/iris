@@ -52,7 +52,7 @@ func (h *TransmitBinaryHandler) Listen(ctx context.Context, ev event.Event) erro
 		switch opt.OptionState.Option() {
 		case TransmitBinary:
 			encodable := ctx.Value(KeyEncodable).(Encodable)
-			if opt.ChangedUs {
+			if opt.ResolvedUs {
 				if opt.EnabledForUs() {
 					encodable.SetWriteEncoding(encoding.Nop)
 				} else {
@@ -60,7 +60,7 @@ func (h *TransmitBinaryHandler) Listen(ctx context.Context, ev event.Event) erro
 				}
 
 			}
-			if opt.ChangedThem {
+			if opt.ResolvedThem {
 				if opt.EnabledForThem() {
 					encodable.SetReadEncoding(encoding.Nop)
 				} else {
@@ -161,6 +161,8 @@ func (h *CharsetHandler) Listen(ctx context.Context, ev event.Event) error {
 	}
 	return nil
 }
+
+func (h *CharsetHandler) Waiting() bool { return h.requestedEncodings != nil }
 
 func (h *CharsetHandler) shouldSetEncoding(opt OptionState) bool {
 	them, us := opt.EnabledForThem(), opt.EnabledForUs()

@@ -203,18 +203,50 @@ func TestOptionEvent(t *testing.T) {
 		expected OptionData
 	}{
 		{optionState{allowThem: true, them: qNo}, WILL, OptionData{&optionState{allowThem: true, them: qYes}, true, false}},
-		{optionState{allowThem: true, them: qWantNoOpposite}, WILL, OptionData{&optionState{allowThem: true, them: qYes}, true, false}},
-		{optionState{allowThem: true, them: qWantYesEmpty}, WILL, OptionData{&optionState{allowThem: true, them: qYes}, true, false}},
-		{optionState{allowUs: true, us: qNo}, DO, OptionData{&optionState{allowUs: true, us: qYes}, false, true}},
-		{optionState{allowUs: true, us: qWantNoOpposite}, DO, OptionData{&optionState{allowUs: true, us: qYes}, false, true}},
-		{optionState{allowUs: true, us: qWantYesEmpty}, DO, OptionData{&optionState{allowUs: true, us: qYes}, false, true}},
 		{optionState{them: qYes}, WONT, OptionData{&optionState{them: qNo}, true, false}},
+		{optionState{them: qWantNoEmpty}, WILL, OptionData{&optionState{them: qNo}, true, false}},
+		{optionState{them: qWantNoEmpty}, WONT, OptionData{&optionState{them: qNo}, true, false}},
+		{optionState{them: qWantNoOpposite}, WILL, OptionData{&optionState{them: qYes}, true, false}},
+		{optionState{them: qWantYesEmpty}, WILL, OptionData{&optionState{them: qYes}, true, false}},
+		{optionState{them: qWantYesEmpty}, WONT, OptionData{&optionState{them: qNo}, true, false}},
+		{optionState{them: qWantYesOpposite}, WONT, OptionData{&optionState{them: qNo}, true, false}},
+		{optionState{allowUs: true, us: qNo}, DO, OptionData{&optionState{allowUs: true, us: qYes}, false, true}},
 		{optionState{us: qYes}, DONT, OptionData{&optionState{us: qNo}, false, true}},
+		{optionState{us: qWantNoEmpty}, DO, OptionData{&optionState{us: qNo}, false, true}},
+		{optionState{us: qWantNoEmpty}, DONT, OptionData{&optionState{us: qNo}, false, true}},
+		{optionState{us: qWantNoOpposite}, DO, OptionData{&optionState{us: qYes}, false, true}},
+		{optionState{us: qWantYesEmpty}, DO, OptionData{&optionState{us: qYes}, false, true}},
+		{optionState{us: qWantYesEmpty}, DONT, OptionData{&optionState{us: qNo}, false, true}},
+		{optionState{us: qWantYesOpposite}, DONT, OptionData{&optionState{us: qNo}, false, true}},
 	}
-	for _, test := range tests {
+	for i, test := range tests {
 		actual = OptionData{}
 		state := test.state
 		state.receive(ctx, test.cmd)
+		require.Equal(t, test.expected, actual, i)
+	}
+}
+
+func TestOptionWaiting(t *testing.T) {
+	tests := []struct {
+		state    optionState
+		expected bool
+	}{
+		{optionState{them: qNo}, false},
+		{optionState{them: qYes}, false},
+		{optionState{them: qWantNoEmpty}, true},
+		{optionState{them: qWantNoOpposite}, true},
+		{optionState{them: qWantYesEmpty}, true},
+		{optionState{them: qWantYesOpposite}, true},
+		{optionState{us: qNo}, false},
+		{optionState{us: qYes}, false},
+		{optionState{us: qWantNoEmpty}, true},
+		{optionState{us: qWantNoOpposite}, true},
+		{optionState{us: qWantYesEmpty}, true},
+		{optionState{us: qWantYesOpposite}, true},
+	}
+	for _, test := range tests {
+		actual := test.state.Waiting()
 		require.Equal(t, test.expected, actual)
 	}
 }

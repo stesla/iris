@@ -44,8 +44,8 @@ func (h LogHandler) Listen(_ context.Context, ev event.Event) error {
 		log.Bytes("data", t)
 	case telnet.OptionData:
 		log.Uint8("option", t.Option()).
-			Bool("changedThem", t.ChangedThem).
-			Bool("changedUs", t.ChangedUs).
+			Bool("resolvedThem", t.ResolvedThem).
+			Bool("resolvedUs", t.ResolvedUs).
 			Bool("enabledThem", t.EnabledForThem()).
 			Bool("enabledUs", t.EnabledForUs())
 	case telnet.Subnegotiation:

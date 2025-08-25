@@ -109,7 +109,7 @@ func (s *telnetSession) handleEvent(_ context.Context, ev event.Event) error {
 	case telnet.OptionData:
 		switch opt.Option() {
 		case telnet.Charset:
-			if opt.ChangedUs && opt.EnabledForUs() {
+			if opt.ResolvedUs && opt.EnabledForUs() {
 				s.charset.RequestEncoding(unicode.UTF8)
 			}
 		}
