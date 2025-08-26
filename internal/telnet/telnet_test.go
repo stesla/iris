@@ -128,7 +128,7 @@ func TestWrite(t *testing.T) {
 		n, err := telnet.Write(test.val)
 		require.NoError(t, err)
 		require.Equal(t, len(test.val), n)
-		require.Equal(t, append(test.expected, IAC, GA), buf.Bytes())
+		require.Equal(t, test.expected, buf.Bytes())
 	}
 }
 
@@ -179,12 +179,23 @@ func TestSuppressGoAhead(t *testing.T) {
 	telnet.options.set(&optionState{opt: SuppressGoAhead, us: qYes})
 	_, err := telnet.Write([]byte("xyzzy"))
 	require.NoError(t, err)
+	err = telnet.SendGoAhead()
+	require.NoError(t, err)
 	require.Equal(t, []byte("xyzzy"), output.Bytes())
 
 	telnet.options.set(&optionState{opt: SuppressGoAhead, us: qNo})
+	output.Reset()
+	_, err = telnet.Write([]byte("xyzzy"))
+	require.NoError(t, err)
+	err = telnet.SendGoAhead()
+	require.NoError(t, err)
+	require.Equal(t, append([]byte("xyzzy"), IAC, GA), output.Bytes())
+
 	telnet.SuppressGoAhead(true)
 	output.Reset()
 	_, err = telnet.Write([]byte("xyzzy"))
+	require.NoError(t, err)
+	err = telnet.SendGoAhead()
 	require.NoError(t, err)
 	require.Equal(t, []byte("xyzzy"), output.Bytes())
 }
@@ -197,6 +208,7 @@ func TestEndOfRecord(t *testing.T) {
 	telnet.options.set(&optionState{opt: SuppressGoAhead, us: qYes})
 	_, err := telnet.Write([]byte("foo"))
 	require.NoError(t, err)
+	telnet.SendEndOfRecord()
 	require.Equal(t, []byte{'f', 'o', 'o', IAC, EOR}, output.Bytes())
 }
 
@@ -204,12 +216,9 @@ func TestLargeWrite(t *testing.T) {
 	var output bytes.Buffer
 	tcp := &mockConn{Writer: &output}
 	telnet := wrap(context.Background(), tcp)
-	telnet.options.set(&optionState{opt: EndOfRecord, us: qYes})
-	telnet.options.set(&optionState{opt: SuppressGoAhead, us: qNo})
-
 	data := bytes.Repeat([]byte("abcdefghijklmnopqrstuvwxyz012345689"), 1024)
 	n, err := telnet.Write(data)
 	require.NoError(t, err)
 	require.Equal(t, len(data), n)
-	require.Equal(t, append(data, IAC, EOR, IAC, GA), output.Bytes())
+	require.Equal(t, data, output.Bytes())
 }

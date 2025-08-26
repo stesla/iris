@@ -19,6 +19,8 @@ type LogHandler struct {
 func (h LogHandler) Register(ctx context.Context) {
 	h.ctx = ctx
 	dispatcher := ctx.Value(telnet.KeyDispatcher).(event.Dispatcher)
+	dispatcher.Listen(telnet.EventEndOfRecord, h)
+	dispatcher.Listen(telnet.EventGoAhead, h)
 	dispatcher.Listen(telnet.EventNegotation, h)
 	dispatcher.Listen(telnet.EventOption, h)
 	dispatcher.Listen(telnet.EventSubnegotiation, h)
@@ -29,6 +31,8 @@ func (h LogHandler) Register(ctx context.Context) {
 
 func (h LogHandler) Unregister() {
 	dispatcher := h.ctx.Value(telnet.KeyDispatcher).(event.Dispatcher)
+	dispatcher.RemoveListener(telnet.EventEndOfRecord, h)
+	dispatcher.RemoveListener(telnet.EventGoAhead, h)
 	dispatcher.RemoveListener(telnet.EventNegotation, h)
 	dispatcher.RemoveListener(telnet.EventOption, h)
 	dispatcher.RemoveListener(telnet.EventSubnegotiation, h)

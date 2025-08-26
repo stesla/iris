@@ -17,6 +17,8 @@ type Conn interface {
 	Context() context.Context
 	GetOption(byte) OptionState
 	RegisterHandler(Handler)
+	SendGoAhead() error
+	SendEndOfRecord() error
 	SuppressGoAhead(bool)
 }
 
@@ -110,6 +112,24 @@ func (c *conn) RegisterHandler(h Handler) {
 	h.Register(c.ctx)
 }
 
+func (c *conn) SendGoAhead() error {
+	if !(c.suppressGoAhead || c.GetOption(SuppressGoAhead).EnabledForUs()) {
+		if _, err := c.Conn.Write([]byte{IAC, GA}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (c *conn) SendEndOfRecord() error {
+	if c.GetOption(EndOfRecord).EnabledForUs() {
+		if _, err := c.Conn.Write([]byte{IAC, EOR}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (c *conn) SetReadEncoding(enc encoding.Encoding) {
 	c.read = enc.NewDecoder().Reader(c.readNoEnc)
 }
@@ -123,29 +143,7 @@ func (c *conn) SuppressGoAhead(value bool) {
 }
 
 func (c *conn) Write(p []byte) (n int, err error) {
-	buf := p[:]
-	if n, err = c.write.Write(buf); err != nil {
-		return
-	}
-	if c.shouldSendEndOfRecord() {
-		if _, err = c.Conn.Write([]byte{IAC, EOR}); err != nil {
-			return
-		}
-	}
-	if c.shouldSendGoAhead() {
-		if _, err = c.Conn.Write([]byte{IAC, GA}); err != nil {
-			return
-		}
-	}
-	return
-}
-
-func (c *conn) shouldSendEndOfRecord() bool {
-	return c.GetOption(EndOfRecord).EnabledForUs()
-}
-
-func (c *conn) shouldSendGoAhead() bool {
-	return !(c.suppressGoAhead || c.GetOption(SuppressGoAhead).EnabledForUs())
+	return c.write.Write(p)
 }
 
 type reader struct {
