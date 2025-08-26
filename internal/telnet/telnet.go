@@ -24,12 +24,13 @@ type conn struct {
 	net.Conn
 	event.Dispatcher
 
-	ctx        context.Context
-	options    OptionMap
-	readNoEnc  *reader
-	read       io.Reader
-	writeNoEnc *writer
-	write      io.Writer
+	ctx             context.Context
+	options         OptionMap
+	readNoEnc       *reader
+	read            io.Reader
+	suppressGoAhead bool
+	writeNoEnc      *writer
+	write           io.Writer
 }
 
 func Wrap(ctx context.Context, c net.Conn) Conn {
@@ -118,11 +119,33 @@ func (c *conn) SetWriteEncoding(enc encoding.Encoding) {
 }
 
 func (c *conn) SuppressGoAhead(value bool) {
-	c.writeNoEnc.suppressGoAhead = value
+	c.suppressGoAhead = value
 }
 
 func (c *conn) Write(p []byte) (n int, err error) {
-	return c.write.Write(p)
+	buf := p[:]
+	if n, err = c.write.Write(buf); err != nil {
+		return
+	}
+	if c.shouldSendEndOfRecord() {
+		if _, err = c.Conn.Write([]byte{IAC, EOR}); err != nil {
+			return
+		}
+	}
+	if c.shouldSendGoAhead() {
+		if _, err = c.Conn.Write([]byte{IAC, GA}); err != nil {
+			return
+		}
+	}
+	return
+}
+
+func (c *conn) shouldSendEndOfRecord() bool {
+	return c.GetOption(EndOfRecord).EnabledForUs()
+}
+
+func (c *conn) shouldSendGoAhead() bool {
+	return !(c.suppressGoAhead || c.GetOption(SuppressGoAhead).EnabledForUs())
 }
 
 type reader struct {
@@ -225,9 +248,8 @@ func (r *reader) Read(p []byte) (n int, err error) {
 }
 
 type writer struct {
-	out             io.Writer
-	ctx             context.Context
-	suppressGoAhead bool
+	out io.Writer
+	ctx context.Context
 }
 
 func (w *writer) Write(p []byte) (n int, err error) {
@@ -245,20 +267,6 @@ func (w *writer) Write(p []byte) (n int, err error) {
 		}
 		n++
 	}
-	if w.shouldSendEndOfRecord() {
-		buf = append(buf, IAC, EOR)
-	}
-	if w.shouldSendGoAhead() {
-		buf = append(buf, IAC, GA)
-	}
 	_, err = w.out.Write(buf)
 	return
-}
-
-func (w *writer) shouldSendEndOfRecord() bool {
-	return getOption(w.ctx, EndOfRecord).EnabledForUs()
-}
-
-func (w *writer) shouldSendGoAhead() bool {
-	return !(w.suppressGoAhead || getOption(w.ctx, SuppressGoAhead).EnabledForUs())
 }

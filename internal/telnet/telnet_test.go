@@ -199,3 +199,17 @@ func TestEndOfRecord(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []byte{'f', 'o', 'o', IAC, EOR}, output.Bytes())
 }
+
+func TestLargeWrite(t *testing.T) {
+	var output bytes.Buffer
+	tcp := &mockConn{Writer: &output}
+	telnet := wrap(context.Background(), tcp)
+	telnet.options.set(&optionState{opt: EndOfRecord, us: qYes})
+	telnet.options.set(&optionState{opt: SuppressGoAhead, us: qNo})
+
+	data := bytes.Repeat([]byte("abcdefghijklmnopqrstuvwxyz012345689"), 1024)
+	n, err := telnet.Write(data)
+	require.NoError(t, err)
+	require.Equal(t, len(data), n)
+	require.Equal(t, append(data, IAC, EOR, IAC, GA), output.Bytes())
+}
