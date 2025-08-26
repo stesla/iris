@@ -10,6 +10,7 @@ import (
 	"net"
 	"os"
 	"path"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -278,10 +279,10 @@ func (s *upstreamSession) AddDownstream(w io.WriteCloser) {
 }
 
 func (s *upstreamSession) Close() error {
-	s.conn.Close()
-	for _, w := range s.downstream {
-		w.Close()
+	for _, wc := range s.downstream {
+		wc.Close()
 	}
+	s.telnetSession.Close()
 	return nil
 }
 
@@ -290,8 +291,10 @@ func (s *upstreamSession) IsConnected() bool {
 }
 
 func (s *upstreamSession) runForever() {
-	defer deleteUpstreamWithKey(s.key)
-	defer s.Close()
+	defer func() {
+		s.Close()
+		deleteUpstreamWithKey(s.key)
+	}()
 	s.logger.Debug().Msg("connected")
 	s.negotiateOptions()
 	for {
@@ -309,9 +312,10 @@ func (s *upstreamSession) runForever() {
 func (s *upstreamSession) sendDownstream(buf []byte) {
 	s.mux.Lock()
 	defer s.mux.Unlock()
-	for _, w := range s.downstream {
-		w.Write(buf)
-	}
+	s.downstream = slices.DeleteFunc(s.downstream, func(wc io.WriteCloser) bool {
+		_, err := wc.Write(buf)
+		return err != nil
+	})
 }
 
 func (s *upstreamSession) setOption(optionName, optionValue string) error {
