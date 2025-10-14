@@ -27,7 +27,7 @@ func main() {
 	}
 
 	if *password == "" {
-		logger.Fatal().Msg("must provide -password or set ENVOY_PASSWORD")
+		logger.Fatal().Msg("must provide -password or set IRIS_PASSWORD")
 	}
 
 	signal.Ignore(os.Interrupt, syscall.SIGHUP, syscall.SIGTERM)
