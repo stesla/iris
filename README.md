@@ -127,6 +127,7 @@ Iris follows a modular architecture with clear separation of concerns:
 ## Development
 
 ### Project Structure
+```
 iris/
 ├── main.go              # Application entry point
 ├── session.go           # Session management logic
@@ -147,6 +148,7 @@ iris/
         ├── option_test.go
         ├── telnet.go    # Telnet protocol wrapper
         └── telnet_test.go
+```
 
 ### Building from Source
 
