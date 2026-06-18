@@ -47,8 +47,12 @@ func (d *dispatcher) Listen(event Name, l Listener) {
 	d.handlers[event] = append(d.handlers[event], l)
 }
 
+type wrapper struct {
+	Listener
+}
+
 func (d *dispatcher) ListenFunc(event Name, fn ListenerFunc) (l Listener) {
-	l = &fn
+	l = &wrapper{fn}
 	d.Listen(event, l)
 	return
 }

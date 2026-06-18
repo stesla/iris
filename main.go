@@ -62,7 +62,7 @@ func main() {
 	go func() {
 		for {
 			if tcp, err := l.Accept(); err != nil {
-				logger.Fatal().Err(err)
+				logger.Fatal().Err(err).Send()
 			} else {
 				chAccept <- tcp
 			}
