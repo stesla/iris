@@ -15,6 +15,8 @@ var (
 	password = flag.String("password", os.Getenv("IRIS_PASSWORD"), "password for server access")
 	level    = flag.String("level", getEnvDefault("IRIS_LOG_LEVEL", "info"), "log level for json logger")
 	logdir   = flag.String("logdir", getEnvDefault("IRIS_LOG_DIR", "./logs"), "logs get saved in this directory")
+
+	sessions = NewSessionPool()
 )
 
 func main() {
@@ -37,7 +39,7 @@ func main() {
 	go func() {
 		for range chReopenSignal {
 			logger.Info().Msg("reopening histories")
-			ReopenHistories()
+			sessions.ReopenHistories()
 		}
 	}()
 
@@ -47,7 +49,7 @@ func main() {
 	go func() {
 		for sig := range chExitSignal {
 			logger.Info().Str("signal", sig.String()).Msg("exiting")
-			CloseAllSessions()
+			sessions.CloseAll()
 			close(chExit)
 		}
 	}()
@@ -78,7 +80,7 @@ loop:
 			break loop
 		case tcp := <-chAccept:
 			go func() {
-				session := newDownstreamSession(tcp)
+				session := sessions.NewDownstream(tcp)
 				defer session.Close()
 				session.runForever()
 			}()

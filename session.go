@@ -1,9 +1,9 @@
 package main
 
 import (
-	"bufio"
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -12,7 +12,6 @@ import (
 	"path"
 	"slices"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -24,23 +23,40 @@ import (
 
 const readBufSize = 4096
 
-var (
-	upstreamsMutex sync.Mutex
-	upstreams      = make(map[string]*upstreamSession)
-)
+type SessionPool struct {
+	sync.Mutex
+	streams map[string]*upstream
+}
 
-func CloseAllSessions() {
-	upstreamsMutex.Lock()
-	defer upstreamsMutex.Unlock()
-	for _, session := range upstreams {
+func NewSessionPool() *SessionPool {
+	return &SessionPool{
+		streams: make(map[string]*upstream),
+	}
+}
+
+func (p *SessionPool) CloseAll() {
+	p.Lock()
+	defer p.Unlock()
+	for _, session := range p.streams {
 		session.Close()
 	}
 }
 
-func ReopenHistories() {
-	upstreamsMutex.Lock()
-	defer upstreamsMutex.Unlock()
-	for _, session := range upstreams {
+func (p *SessionPool) NewDownstream(conn net.Conn) *downstream {
+	result := &downstream{
+		pool: p,
+		telnetSession: newSession(conn, logger.With().
+			Str("client", conn.RemoteAddr().String()).
+			Logger()),
+	}
+	result.charset.IsServer = true
+	return result
+}
+
+func (p *SessionPool) ReopenHistories() {
+	p.Lock()
+	defer p.Unlock()
+	for _, session := range p.streams {
 		if err := session.history.Reopen(); err != nil {
 			session.Close()
 			logger.Error().Err(err).Str("session-key", session.key).Msg("error reloading history")
@@ -48,22 +64,23 @@ func ReopenHistories() {
 	}
 }
 
-func upstreamForKey(key string) *upstreamSession {
-	upstreamsMutex.Lock()
-	defer upstreamsMutex.Unlock()
-	if _, found := upstreams[key]; !found {
-		upstreams[key] = &upstreamSession{
+func (p *SessionPool) upstreamForKey(key string) *upstream {
+	p.Lock()
+	defer p.Unlock()
+	if _, found := p.streams[key]; !found {
+		p.streams[key] = &upstream{
+			pool:       p,
 			key:        key,
 			dispatcher: event.NewDispatcher(),
 		}
 	}
-	return upstreams[key]
+	return p.streams[key]
 }
 
-func deleteUpstreamWithKey(key string) {
-	upstreamsMutex.Lock()
-	defer upstreamsMutex.Unlock()
-	delete(upstreams, key)
+func (p *SessionPool) deleteUpstreamWithKey(key string) {
+	p.Lock()
+	defer p.Unlock()
+	delete(p.streams, key)
 }
 
 type telnetSession struct {
@@ -141,24 +158,19 @@ func (s *telnetSession) negotiateOptions() {
 	}
 }
 
-type downstreamSession struct {
+type downstream struct {
+	pool *SessionPool
 	*telnetSession
-	*bufio.Scanner
-	upstream *upstreamSession
+	upstream *upstream
+
+	Password string            `json:"password"`
+	Key      string            `json:"key"`
+	Address  string            `json:"address"`
+	Script   string            `json:"script"`
+	Options  map[string]string `json:"options"`
 }
 
-func newDownstreamSession(conn net.Conn) *downstreamSession {
-	result := &downstreamSession{
-		telnetSession: newSession(conn, logger.With().
-			Str("client", conn.RemoteAddr().String()).
-			Logger()),
-	}
-	result.charset.IsServer = true
-	result.Scanner = bufio.NewScanner(result)
-	return result
-}
-
-func (s *downstreamSession) Listen(_ context.Context, ev event.Event) error {
+func (s *downstream) Listen(_ context.Context, ev event.Event) error {
 	switch ev.Name {
 	case EventCharsetResolved:
 		go s.dispatcher.RemoveListener(EventCharsetResolved, s)
@@ -170,73 +182,57 @@ func (s *downstreamSession) Listen(_ context.Context, ev event.Event) error {
 	return nil
 }
 
-func (s *downstreamSession) authenticate() bool {
-	if s.Scan() {
-		return s.Text() == "login "+*password
-	}
-	return false
-}
-
-func (s *downstreamSession) connectNewUpstream(rest string, buf bytes.Buffer) error {
-	addr := strings.TrimSpace(rest)
+func (s *downstream) connectNewUpstream() error {
 	fmt.Fprintf(s, "connecting to %v...", addr)
-	if err := s.upstream.Connect(addr); err != nil {
+	if err := s.upstream.Connect(s.Address); err != nil {
 		return fmt.Errorf("error connecting (%v): %w", addr, err)
 	}
-	if _, err := s.upstream.Write(buf.Bytes()); err != nil {
+	if _, err := s.upstream.Write([]byte(s.Script)); err != nil {
 		return fmt.Errorf("error writing to (%v): %w", addr, err)
 	}
 	return nil
 }
 
-func (s *downstreamSession) findUpstream() error {
-	var buf bytes.Buffer
-	for s.Scan() {
-		switch command, rest, _ := strings.Cut(s.Text(), " "); command {
-		case "connect":
-			return s.connectNewUpstream(rest, buf)
-		case "option":
-			option, value, _ := strings.Cut(rest, " ")
+func (s *downstream) connectUpstream() error {
+	decoder := json.NewDecoder(s)
+	if err := decoder.Decode(&s); err != nil {
+		return err
+	}
+	s.logger.Trace().Str("key", s.Key).Str("address", s.Address).Str("script", s.Script).Send()
+	if s.Password != *password {
+		return fmt.Errorf("invalid password")
+	}
+	s.upstream = s.pool.upstreamForKey(s.Key)
+	s.upstream.AddDownstream(s)
+	if s.upstream.IsConnected() {
+		s.dispatcher.Listen(EventCharsetResolved, s)
+	} else {
+		for option, value := range s.Options {
 			if err := s.upstream.setOption(option, value); err != nil {
 				return err
 			}
-		case "send":
-			fmt.Fprintln(&buf, rest)
-		case "upstream":
-			s.upstream = upstreamForKey(rest)
-			s.upstream.AddDownstream(s)
-			if s.upstream.IsConnected() {
-				s.dispatcher.Listen(EventCharsetResolved, s)
-				return nil
-			}
-		default:
-			fmt.Fprintln(s, "unrecognized command:", s.Text())
 		}
+		return s.connectNewUpstream()
 	}
-	// the only case where we ever get here is if we fail to scan, which will
-	// only happen if the client disconnected
-	return io.EOF
+	return nil
 }
 
 const EventCharsetResolved = "charset.resolved"
 
-func (s *downstreamSession) runForever() {
+func (s *downstream) runForever() {
 	s.logger.Debug().Msg("connected")
 	defer s.logger.Debug().Msg("disconnected")
 
 	s.negotiateOptions()
-	if !s.authenticate() {
-		return
-	}
-	err := s.findUpstream()
-	if err != nil {
-		fmt.Fprintln(s, "error connecting upstream:", err)
+	if err := s.connectUpstream(); err != nil {
+		s.logger.Info().AnErr("error", err).Msg("error connecting upstream")
 		return
 	}
 	io.Copy(s.upstream, s)
 }
 
-type upstreamSession struct {
+type upstream struct {
+	pool *SessionPool
 	*telnetSession
 	key        string
 	mux        sync.Mutex
@@ -247,7 +243,7 @@ type upstreamSession struct {
 
 const EventConnectUpstream event.Name = "upstream.connect"
 
-func (s *upstreamSession) Connect(addr string) (err error) {
+func (s *upstream) Connect(addr string) (err error) {
 	if s == nil {
 		return errors.New("you must select an upstream to connect")
 	}
@@ -272,13 +268,13 @@ func (s *upstreamSession) Connect(addr string) (err error) {
 	return nil
 }
 
-func (s *upstreamSession) AddDownstream(w io.WriteCloser) {
+func (s *upstream) AddDownstream(w io.WriteCloser) {
 	s.mux.Lock()
 	defer s.mux.Unlock()
 	s.downstream = append(s.downstream, w)
 }
 
-func (s *upstreamSession) Close() error {
+func (s *upstream) Close() error {
 	for _, wc := range s.downstream {
 		wc.Close()
 	}
@@ -286,14 +282,14 @@ func (s *upstreamSession) Close() error {
 	return nil
 }
 
-func (s *upstreamSession) IsConnected() bool {
+func (s *upstream) IsConnected() bool {
 	return s.telnetSession != nil
 }
 
-func (s *upstreamSession) runForever() {
+func (s *upstream) runForever() {
 	defer func() {
 		s.Close()
-		deleteUpstreamWithKey(s.key)
+		s.pool.deleteUpstreamWithKey(s.key)
 	}()
 	s.logger.Debug().Msg("connected")
 	s.negotiateOptions()
@@ -309,7 +305,7 @@ func (s *upstreamSession) runForever() {
 	s.logger.Debug().Msg("disconnected")
 }
 
-func (s *upstreamSession) sendDownstream(buf []byte) {
+func (s *upstream) sendDownstream(buf []byte) {
 	s.mux.Lock()
 	defer s.mux.Unlock()
 	s.downstream = slices.DeleteFunc(s.downstream, func(wc io.WriteCloser) bool {
@@ -318,7 +314,7 @@ func (s *upstreamSession) sendDownstream(buf []byte) {
 	})
 }
 
-func (s *upstreamSession) setOption(optionName, optionValue string) error {
+func (s *upstream) setOption(optionName, optionValue string) error {
 	if s == nil {
 		return errors.New("you must select an upstream to set options")
 	}
