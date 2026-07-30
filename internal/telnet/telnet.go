@@ -135,7 +135,8 @@ func (c *conn) SetReadEncoding(enc encoding.Encoding) {
 }
 
 func (c *conn) SetWriteEncoding(enc encoding.Encoding) {
-	c.write = enc.NewEncoder().Writer(c.writeNoEnc)
+	encoder := encoding.ReplaceUnsupported(enc.NewEncoder())
+	c.write = encoder.Writer(c.writeNoEnc)
 }
 
 func (c *conn) SuppressGoAhead(value bool) {

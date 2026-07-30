@@ -30,8 +30,8 @@ func TestDefaultEncodingASCII(t *testing.T) {
 	require.Equal(t, expected, buf[:n])
 
 	n, err = telnet.Write([]byte{IAC, 128, 129})
-	require.ErrorContains(t, err, "rune not supported")
-	require.Equal(t, 0, n)
+	require.NoError(t, err)
+	require.Equal(t, []byte{encoding.ASCIISub, encoding.ASCIISub, encoding.ASCIISub}, output.Bytes())
 }
 
 func TestTransmitBinary(t *testing.T) {
@@ -78,8 +78,8 @@ func TestTransmitBinary(t *testing.T) {
 	require.Equal(t, expected, buf[:n])
 
 	n, err = telnet.Write([]byte{IAC, 254, 253})
-	require.ErrorContains(t, err, "rune not supported")
-	require.Equal(t, 0, n)
+	require.NoError(t, err)
+	require.Equal(t, []byte{encoding.ASCIISub, encoding.ASCIISub, encoding.ASCIISub}, output.Bytes())
 
 	dispatch(telnet.Context(), event.Event{
 		Name: EventOption,
@@ -95,8 +95,8 @@ func TestTransmitBinary(t *testing.T) {
 
 	output.Reset()
 	n, err = telnet.Write([]byte{IAC, 254, 253})
-	require.ErrorContains(t, err, "rune not supported")
-	require.Equal(t, 0, n)
+	require.NoError(t, err)
+	require.Equal(t, []byte{encoding.ASCIISub, encoding.ASCIISub, encoding.ASCIISub}, output.Bytes())
 }
 
 func (h *CharsetHandler) reset() {
