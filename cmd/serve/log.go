@@ -1,15 +1,12 @@
-package main
+package serve
 
 import (
 	"context"
-	"os"
 
 	"github.com/rs/zerolog"
 	"github.com/stesla/iris/internal/event"
 	"github.com/stesla/iris/internal/telnet"
 )
-
-var logger = zerolog.New(os.Stdout)
 
 type LogHandler struct {
 	ctx context.Context

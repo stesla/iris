@@ -1,4 +1,4 @@
-package main
+package serve
 
 import (
 	"bytes"
@@ -27,11 +27,14 @@ const readBufSize = 4096
 type SessionPool struct {
 	sync.Mutex
 	streams map[string]*upstream
+	logger  *zerolog.Logger
 }
 
-func NewSessionPool() *SessionPool {
+func NewSessionPool(ctx context.Context) *SessionPool {
+	logger, _ := ctx.Value("logger").(*zerolog.Logger)
 	return &SessionPool{
 		streams: make(map[string]*upstream),
+		logger:  logger,
 	}
 }
 
@@ -46,7 +49,7 @@ func (p *SessionPool) CloseAll() {
 func (p *SessionPool) NewDownstream(conn net.Conn) *downstream {
 	result := &downstream{
 		pool: p,
-		telnetSession: newSession(conn, logger.With().
+		telnetSession: newSession(conn, p.logger.With().
 			Str("client", conn.RemoteAddr().String()).
 			Logger()),
 	}
@@ -60,7 +63,7 @@ func (p *SessionPool) ReopenHistories() {
 	for _, session := range p.streams {
 		if err := session.history.Reopen(); err != nil {
 			session.Close()
-			logger.Error().Err(err).Str("session-key", session.key).Msg("error reloading history")
+			p.logger.Error().Err(err).Str("session-key", session.key).Msg("error reloading history")
 		}
 	}
 }
@@ -243,6 +246,7 @@ type upstream struct {
 	downstream []io.WriteCloser
 	history    History
 	dispatcher event.Dispatcher
+	logger     zerolog.Logger
 }
 
 const EventConnectUpstream event.Name = "upstream.connect"
@@ -261,7 +265,7 @@ func (s *upstream) Connect(addr string) (err error) {
 	if err != nil {
 		return err
 	}
-	s.telnetSession = newSession(tcp, logger.With().
+	s.telnetSession = newSession(tcp, s.logger.With().
 		Str("server", tcp.RemoteAddr().String()).
 		Logger())
 	s.dispatcher.Dispatch(s.Context(), event.Event{
