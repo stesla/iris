@@ -140,7 +140,10 @@ func (s *telnetSession) Listen(_ context.Context, ev event.Event) error {
 				}
 			}
 		}
-	case telnet.EventCharsetAccepted, telnet.EventCharsetRejected:
+	case telnet.EventCharsetAccepted:
+		s.GetOption(telnet.TransmitBinary).Allow(true, true).EnableBoth(s.Context())
+		fallthrough
+	case telnet.EventCharsetRejected:
 		s.dispatcher.Dispatch(context.Background(), event.Event{Name: EventCharsetResolved})
 	}
 	return nil
@@ -150,7 +153,6 @@ func (s *telnetSession) negotiateOptions() {
 	opts := []byte{
 		telnet.SuppressGoAhead,
 		telnet.EndOfRecord,
-		telnet.TransmitBinary,
 		telnet.Charset,
 	}
 	for _, opt := range opts {
