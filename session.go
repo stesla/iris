@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/rs/zerolog"
+	"github.com/spf13/viper"
 	"github.com/stesla/iris/internal/event"
 	"github.com/stesla/iris/internal/telnet"
 	"golang.org/x/text/encoding/unicode"
@@ -185,6 +186,7 @@ func (s *downstream) Listen(_ context.Context, ev event.Event) error {
 }
 
 func (s *downstream) connectNewUpstream() error {
+	addr := viper.GetString("addr")
 	fmt.Fprintf(s, "connecting to %v...", addr)
 	if err := s.upstream.Connect(s.Address); err != nil {
 		return fmt.Errorf("error connecting (%v): %w", addr, err)
@@ -201,7 +203,7 @@ func (s *downstream) connectUpstream() error {
 		return err
 	}
 	s.logger.Trace().Str("key", s.Key).Str("address", s.Address).Str("script", s.Script).Send()
-	if s.Password != *password {
+	if s.Password != viper.GetString("password") {
 		return fmt.Errorf("invalid password")
 	}
 	s.upstream = s.pool.upstreamForKey(s.Key)
@@ -371,7 +373,7 @@ type logFile struct {
 
 func (f *logFile) Open() (err error) {
 	logFileName := path.Join(
-		*logdir,
+		viper.GetString("log.dir"),
 		fmt.Sprintf("%s-%s.log", time.Now().Format("2006-01-02"), f.key),
 	)
 	f.File, err = os.OpenFile(

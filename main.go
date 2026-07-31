@@ -1,35 +1,47 @@
 package main
 
 import (
-	"flag"
 	"net"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/rs/zerolog"
+	"github.com/spf13/viper"
 )
 
-var (
-	addr     = flag.String("addr", getEnvDefault("IRIS_ADDR", ":4001"), "address on which to listen")
-	password = flag.String("password", os.Getenv("IRIS_PASSWORD"), "password for server access")
-	level    = flag.String("level", getEnvDefault("IRIS_LOG_LEVEL", "info"), "log level for json logger")
-	logdir   = flag.String("logdir", getEnvDefault("IRIS_LOG_DIR", "./logs"), "logs get saved in this directory")
-
-	sessions = NewSessionPool()
-)
+var sessions = NewSessionPool()
 
 func main() {
-	flag.Parse()
+	viper.SetEnvPrefix("IRIS")
+	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 
-	if l, err := zerolog.ParseLevel(*level); err != nil {
-		logger.Fatal().Str("level", *level).Msg("invalid level")
+	viper.SetDefault("addr", ":4001")
+	viper.SetDefault("log.level", "info")
+	viper.SetDefault("log.dir", "./logs")
+
+	viper.AutomaticEnv()
+
+	if config := viper.GetString("config"); config != "" {
+		viper.SetConfigFile(config)
+	} else {
+		viper.SetConfigName("config")
+		viper.AddConfigPath("$HOME/.config/iris")
+		viper.AddConfigPath(".")
+	}
+	if err := viper.ReadInConfig(); err != nil {
+		logger.Fatal().Err(err).Msg("error loading config")
+	}
+
+	if l, err := zerolog.ParseLevel(viper.GetString("log.level")); err != nil {
+		logger.Fatal().Str("level", viper.GetString("log.level")).Msg("invalid level")
 	} else {
 		logger = logger.Level(l)
 	}
 
-	if *password == "" {
-		logger.Fatal().Msg("must provide -password or set IRIS_PASSWORD")
+	if viper.GetString("password") == "" {
+		logger.Fatal().Msg("must set IRIS_PASSWORD")
 	}
 
 	signal.Ignore(os.Interrupt, syscall.SIGHUP, syscall.SIGTERM)
@@ -54,7 +66,7 @@ func main() {
 		}
 	}()
 
-	l, err := net.Listen("tcp", *addr)
+	l, err := net.Listen("tcp", viper.GetString("addr"))
 	if err != nil {
 		logger.Fatal().Err(err).Send()
 	}
@@ -71,7 +83,7 @@ func main() {
 		}
 	}()
 
-	logger.Info().Str("addr", *addr).Int("pid", os.Getpid()).Msg("listening")
+	logger.Info().Str("addr", viper.GetString("addr")).Int("pid", os.Getpid()).Msg("listening")
 
 loop:
 	for {
