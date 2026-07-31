@@ -1,15 +1,19 @@
 package serve
 
 import (
+	"database/sql"
 	"net"
 	"os"
 	"os/signal"
 	"syscall"
 
+	_ "github.com/mattn/go-sqlite3"
 	"github.com/rs/zerolog"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
+
+var logger = zerolog.New(os.Stdout)
 
 func AddToCommand(cmd *cobra.Command) {
 	cmd.AddCommand(&cobra.Command{
@@ -20,9 +24,16 @@ func AddToCommand(cmd *cobra.Command) {
 }
 
 func Serve(cmd *cobra.Command, args []string) {
-	logger, _ := cmd.Context().Value("logger").(*zerolog.Logger)
+	db, err := sql.Open("sqlite3", viper.GetString("db"))
+	cobra.CheckErr(err)
 
-	sessions := NewSessionPool(cmd.Context())
+	if l, err := zerolog.ParseLevel(viper.GetString("log.level")); err != nil {
+		cobra.CheckErr(err)
+	} else {
+		logger.Level(l)
+	}
+
+	sessions := NewSessionPool(db, logger)
 
 	signal.Ignore(os.Interrupt, syscall.SIGHUP, syscall.SIGTERM)
 

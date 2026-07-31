@@ -3,6 +3,7 @@ package serve
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,6 +13,7 @@ import (
 	"path"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -19,6 +21,7 @@ import (
 	"github.com/spf13/viper"
 	"github.com/stesla/iris/internal/event"
 	"github.com/stesla/iris/internal/telnet"
+	"golang.org/x/crypto/bcrypt"
 	"golang.org/x/text/encoding/unicode"
 )
 
@@ -27,13 +30,14 @@ const readBufSize = 4096
 type SessionPool struct {
 	sync.Mutex
 	streams map[string]*upstream
-	logger  *zerolog.Logger
+	db      *sql.DB
+	logger  zerolog.Logger
 }
 
-func NewSessionPool(ctx context.Context) *SessionPool {
-	logger, _ := ctx.Value("logger").(*zerolog.Logger)
+func NewSessionPool(db *sql.DB, logger zerolog.Logger) *SessionPool {
 	return &SessionPool{
 		streams: make(map[string]*upstream),
+		db:      db,
 		logger:  logger,
 	}
 }
@@ -76,6 +80,7 @@ func (p *SessionPool) upstreamForKey(key string) *upstream {
 			pool:       p,
 			key:        key,
 			dispatcher: event.NewDispatcher(),
+			logger:     p.logger,
 		}
 	}
 	return p.streams[key]
@@ -169,10 +174,8 @@ type downstream struct {
 	*telnetSession
 	upstream *upstream
 
+	Name     string            `json:"name"`
 	Password string            `json:"password"`
-	Key      string            `json:"key"`
-	Address  string            `json:"address"`
-	Script   string            `json:"script"`
 	Options  map[string]string `json:"options"`
 }
 
@@ -189,14 +192,25 @@ func (s *downstream) Listen(_ context.Context, ev event.Event) error {
 }
 
 func (s *downstream) connectNewUpstream() error {
-	addr := viper.GetString("addr")
-	fmt.Fprintf(s, "connecting to %v...", addr)
-	if err := s.upstream.Connect(s.Address); err != nil {
-		return fmt.Errorf("error connecting (%v): %w", addr, err)
+	var address, hash, script string
+	row := s.pool.db.QueryRow("SELECT address, bcrypt, script FROM upstreams WHERE name=?", s.Name)
+	if err := row.Scan(&address, &hash, &script); err != nil {
+		return err
 	}
-	if _, err := s.upstream.Write([]byte(s.Script)); err != nil {
-		return fmt.Errorf("error writing to (%v): %w", addr, err)
+	if err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(s.Password)); err != nil {
+		return err
 	}
+
+	fmt.Fprintf(s, "connecting to %v...", address)
+	if err := s.upstream.Connect(address); err != nil {
+		return fmt.Errorf("error connecting (%v): %w", address, err)
+	}
+
+	script = strings.ReplaceAll(script, "%PASSWORD%", s.Password) + "\n"
+	if _, err := s.upstream.Write([]byte(script)); err != nil {
+		return fmt.Errorf("error writing to (%v): %w", address, err)
+	}
+
 	return nil
 }
 
@@ -205,11 +219,7 @@ func (s *downstream) connectUpstream() error {
 	if err := decoder.Decode(&s); err != nil {
 		return err
 	}
-	s.logger.Trace().Str("key", s.Key).Str("address", s.Address).Str("script", s.Script).Send()
-	if s.Password != viper.GetString("password") {
-		return fmt.Errorf("invalid password")
-	}
-	s.upstream = s.pool.upstreamForKey(s.Key)
+	s.upstream = s.pool.upstreamForKey(s.Name)
 	s.upstream.AddDownstream(s)
 	if s.upstream.IsConnected() {
 		s.dispatcher.Listen(EventCharsetResolved, s)
