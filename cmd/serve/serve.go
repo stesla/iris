@@ -67,23 +67,23 @@ func (s *apiServer) AddUpstream(_ context.Context, r *api.AddUpstreamRequest) (*
 	}
 
 	_, err = s.db.Exec(
-		"INSERT INTO upstreams (name, address, bcrypt, script) VALUES (?, ?, ?, ?)",
-		r.Name, r.Address, hash, r.Script,
+		"INSERT INTO upstreams (name, address, login, bcrypt, script) VALUES (?, ?, ?, ?, ?)",
+		r.Upstream.Name, r.Upstream.Address, r.Upstream.Login, hash, r.Script,
 	)
 
 	return &emptypb.Empty{}, err
 }
 
-func (s *apiServer) ListUpstreams(context.Context, *emptypb.Empty) (*api.ListUpstreamResponse, error) {
-	rows, err := s.db.Query("SELECT name FROM upstreams")
+func (s *apiServer) ListUpstreams(context.Context, *emptypb.Empty) (*api.ListUpstreamsResponse, error) {
+	rows, err := s.db.Query("SELECT name, address, login FROM upstreams")
 	if err != nil {
 		return nil, err
 	}
-	result := &api.ListUpstreamResponse{}
-	var name string
+	result := &api.ListUpstreamsResponse{}
 	for rows.Next() {
-		rows.Scan(&name)
-		result.Upstreams = append(result.Upstreams, name)
+		upstream := &api.Upstream{}
+		rows.Scan(&upstream.Name, &upstream.Address, &upstream.Login)
+		result.Upstreams = append(result.Upstreams, upstream)
 	}
 	return result, rows.Err()
 }

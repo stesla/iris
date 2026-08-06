@@ -192,9 +192,10 @@ func (s *downstream) Listen(_ context.Context, ev event.Event) error {
 }
 
 func (s *downstream) connectNewUpstream() error {
-	var address, hash, script string
-	row := s.pool.db.QueryRow("SELECT address, bcrypt, script FROM upstreams WHERE name=?", s.Name)
-	if err := row.Scan(&address, &hash, &script); err != nil {
+	var address, login, hash string
+	var script sql.NullString
+	row := s.pool.db.QueryRow("SELECT address, login, bcrypt, script FROM upstreams WHERE name=?", s.Name)
+	if err := row.Scan(&address, &login, &hash, &script); err != nil {
 		return err
 	}
 	if err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(s.Password)); err != nil {
@@ -206,8 +207,16 @@ func (s *downstream) connectNewUpstream() error {
 		return fmt.Errorf("error connecting (%v): %w", address, err)
 	}
 
-	script = strings.ReplaceAll(script, "%PASSWORD%", s.Password) + "\n"
-	if _, err := s.upstream.Write([]byte(script)); err != nil {
+	var connectScript string
+	if script.Valid {
+		connectScript = script.String
+	} else {
+		connectScript = "connect %LOGIN% %PASSWORD%"
+	}
+
+	connectScript = strings.ReplaceAll(connectScript, "%LOGIN%", login)
+	connectScript = strings.ReplaceAll(connectScript, "%PASSWORD%", s.Password)
+	if _, err := s.upstream.Write([]byte(connectScript + "\n")); err != nil {
 		return fmt.Errorf("error writing to (%v): %w", address, err)
 	}
 

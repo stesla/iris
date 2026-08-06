@@ -4,16 +4,21 @@ option go_package = "github.com/stesla/iris/api";
 
 service Upstreams {
   rpc AddUpstream (AddUpstreamRequest) returns (google.protobuf.Empty) {}
-  rpc ListUpstreams (google.protobuf.Empty) returns (ListUpstreamResponse) {}
+  rpc ListUpstreams (google.protobuf.Empty) returns (ListUpstreamsResponse) {}
+}
+
+message Upstream {
+  required string name = 1;
+  required string address = 2;
+  required string login = 3;
 }
 
 message AddUpstreamRequest {
-  required string name = 1;
-  required string address = 2;
+  required Upstream upstream = 1;
   required string password = 3;
-  required string script = 4;
+  optional string script = 4;
 }
 
-message ListUpstreamResponse {
-  repeated string upstreams = 1;
+message ListUpstreamsResponse {
+  repeated Upstream upstreams = 1;
 }

@@ -22,7 +22,7 @@ var upstreamCommand = &cobra.Command{
 
 func init() {
 	upstreamCommand.AddCommand(&cobra.Command{
-		Use:   "add NAME ADDRESS PASSWORD SCRIPT",
+		Use:   "add NAME ADDRESS LOGIN PASSWORD [SCRIPT]",
 		Short: "add a new upstream",
 		Args:  cobra.ExactArgs(4),
 		RunE:  Add,
@@ -41,10 +41,15 @@ func AddToCommand(cmd *cobra.Command) {
 
 func Add(cmd *cobra.Command, args []string) error {
 	req := &api.AddUpstreamRequest{
-		Name:     &args[0],
-		Address:  &args[1],
-		Password: &args[2],
-		Script:   &args[3],
+		Upstream: &api.Upstream{
+			Name:    &args[0],
+			Address: &args[1],
+			Login:   &args[2],
+		},
+		Password: &args[3],
+	}
+	if len(args) > 4 {
+		req.Script = &args[4]
 	}
 	conn, err := grpcNew()
 	cobra.CheckErr(err)

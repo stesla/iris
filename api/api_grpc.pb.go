@@ -29,7 +29,7 @@ const (
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type UpstreamsClient interface {
 	AddUpstream(ctx context.Context, in *AddUpstreamRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
-	ListUpstreams(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*ListUpstreamResponse, error)
+	ListUpstreams(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*ListUpstreamsResponse, error)
 }
 
 type upstreamsClient struct {
@@ -50,9 +50,9 @@ func (c *upstreamsClient) AddUpstream(ctx context.Context, in *AddUpstreamReques
 	return out, nil
 }
 
-func (c *upstreamsClient) ListUpstreams(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*ListUpstreamResponse, error) {
+func (c *upstreamsClient) ListUpstreams(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*ListUpstreamsResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(ListUpstreamResponse)
+	out := new(ListUpstreamsResponse)
 	err := c.cc.Invoke(ctx, Upstreams_ListUpstreams_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
@@ -65,7 +65,7 @@ func (c *upstreamsClient) ListUpstreams(ctx context.Context, in *emptypb.Empty, 
 // for forward compatibility.
 type UpstreamsServer interface {
 	AddUpstream(context.Context, *AddUpstreamRequest) (*emptypb.Empty, error)
-	ListUpstreams(context.Context, *emptypb.Empty) (*ListUpstreamResponse, error)
+	ListUpstreams(context.Context, *emptypb.Empty) (*ListUpstreamsResponse, error)
 	mustEmbedUnimplementedUpstreamsServer()
 }
 
@@ -79,7 +79,7 @@ type UnimplementedUpstreamsServer struct{}
 func (UnimplementedUpstreamsServer) AddUpstream(context.Context, *AddUpstreamRequest) (*emptypb.Empty, error) {
 	return nil, status.Error(codes.Unimplemented, "method AddUpstream not implemented")
 }
-func (UnimplementedUpstreamsServer) ListUpstreams(context.Context, *emptypb.Empty) (*ListUpstreamResponse, error) {
+func (UnimplementedUpstreamsServer) ListUpstreams(context.Context, *emptypb.Empty) (*ListUpstreamsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListUpstreams not implemented")
 }
 func (UnimplementedUpstreamsServer) mustEmbedUnimplementedUpstreamsServer() {}
