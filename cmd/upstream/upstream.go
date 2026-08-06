@@ -1,12 +1,18 @@
 package upstream
 
 import (
-	"database/sql"
-	_ "github.com/mattn/go-sqlite3"
+	"context"
+	"fmt"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
-	"golang.org/x/crypto/bcrypt"
+
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/protobuf/types/known/emptypb"
+
+	"github.com/stesla/iris/api"
 )
 
 var upstreamCommand = &cobra.Command{
@@ -21,6 +27,12 @@ func init() {
 		Args:  cobra.ExactArgs(4),
 		RunE:  Add,
 	})
+	upstreamCommand.AddCommand(&cobra.Command{
+		Use:   "list",
+		Short: "list all upstreams",
+		Args:  cobra.NoArgs,
+		Run:   List,
+	})
 }
 
 func AddToCommand(cmd *cobra.Command) {
@@ -28,20 +40,38 @@ func AddToCommand(cmd *cobra.Command) {
 }
 
 func Add(cmd *cobra.Command, args []string) error {
-	key := args[0]
-	address := args[1]
-	password := args[2]
-	script := args[3]
-
-	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
-	if err != nil {
-		return err
+	req := &api.AddUpstreamRequest{
+		Name:     &args[0],
+		Address:  &args[1],
+		Password: &args[2],
+		Script:   &args[3],
 	}
+	conn, err := grpcNew()
+	cobra.CheckErr(err)
 
-	db, err := sql.Open("sqlite3", viper.GetString("db"))
-	if err != nil {
-		return err
-	}
-	_, err = db.Exec("INSERT INTO upstreams (name, address, bcrypt, script) VALUES (?, ?, ?, ?)", key, address, hash, script)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	_, err = conn.AddUpstream(ctx, req)
 	return err
+}
+
+func List(cmd *cobra.Command, args []string) {
+	conn, err := grpcNew()
+	cobra.CheckErr(err)
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	resp, err := conn.ListUpstreams(ctx, &emptypb.Empty{})
+	cobra.CheckErr(err)
+	for _, name := range resp.Upstreams {
+		fmt.Println(name)
+	}
+}
+
+func grpcNew() (api.UpstreamsClient, error) {
+	conn, err := grpc.NewClient(
+		viper.GetString("grpc.client.addr"),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	return api.NewUpstreamsClient(conn), err
 }

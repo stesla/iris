@@ -24,8 +24,10 @@ func init() {
 	viper.SetEnvPrefix("IRIS")
 	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 
-	viper.SetDefault("addr", ":4001")
+	viper.SetDefault("addr", ":4042")
 	viper.SetDefault("db", "./iris.db")
+	viper.SetDefault("grpc.client.addr", "localhost:40042")
+	viper.SetDefault("grpc.server.addr", ":40042")
 	viper.SetDefault("log.level", "info")
 	viper.SetDefault("log.dir", "./logs")
 
@@ -38,8 +40,8 @@ func initConfig() {
 		viper.SetConfigFile(config)
 	} else {
 		viper.SetConfigName("config")
-		viper.AddConfigPath("$HOME/.config/iris")
 		viper.AddConfigPath(".")
+		viper.AddConfigPath("$HOME/.config/iris")
 	}
 
 	viper.AutomaticEnv()
