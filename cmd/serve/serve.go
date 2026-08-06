@@ -74,6 +74,38 @@ func (s *apiServer) AddUpstream(_ context.Context, r *api.AddUpstreamRequest) (*
 	return &emptypb.Empty{}, err
 }
 
+func (s *apiServer) EditUpstream(_ context.Context, r *api.EditUpstreamRequest) (*emptypb.Empty, error) {
+	var hash string
+	row := s.db.QueryRow("SELECT bcrypt FROM upstreams WHERE name=?", r.Name)
+	if err := row.Scan(&hash); err != nil {
+		return nil, err
+	}
+	if err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(*r.Password)); err != nil {
+		return nil, err
+	}
+
+	query := "UPDATE upstreams SET"
+	args := []any{}
+	fields := map[string]*string{
+		"name":     r.NewName,
+		"password": r.NewPassword,
+		"address":  r.Address,
+		"login":    r.Login,
+		"script":   r.Script,
+	}
+	for field, value := range fields {
+		if value != nil {
+			query += " " + field + "=?"
+			args = append(args, *value)
+		}
+	}
+	query += " WHERE name=?"
+	args = append(args, *r.Name)
+
+	_, err := s.db.Exec(query, args...)
+	return &emptypb.Empty{}, err
+}
+
 func (s *apiServer) ListUpstreams(context.Context, *emptypb.Empty) (*api.ListUpstreamsResponse, error) {
 	rows, err := s.db.Query("SELECT name, address, login FROM upstreams")
 	if err != nil {

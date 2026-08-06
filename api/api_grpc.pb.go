@@ -21,6 +21,7 @@ const _ = grpc.SupportPackageIsVersion9
 
 const (
 	Upstreams_AddUpstream_FullMethodName   = "/Upstreams/AddUpstream"
+	Upstreams_EditUpstream_FullMethodName  = "/Upstreams/EditUpstream"
 	Upstreams_ListUpstreams_FullMethodName = "/Upstreams/ListUpstreams"
 )
 
@@ -29,6 +30,7 @@ const (
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type UpstreamsClient interface {
 	AddUpstream(ctx context.Context, in *AddUpstreamRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
+	EditUpstream(ctx context.Context, in *EditUpstreamRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
 	ListUpstreams(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*ListUpstreamsResponse, error)
 }
 
@@ -50,6 +52,16 @@ func (c *upstreamsClient) AddUpstream(ctx context.Context, in *AddUpstreamReques
 	return out, nil
 }
 
+func (c *upstreamsClient) EditUpstream(ctx context.Context, in *EditUpstreamRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(emptypb.Empty)
+	err := c.cc.Invoke(ctx, Upstreams_EditUpstream_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *upstreamsClient) ListUpstreams(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*ListUpstreamsResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ListUpstreamsResponse)
@@ -65,6 +77,7 @@ func (c *upstreamsClient) ListUpstreams(ctx context.Context, in *emptypb.Empty, 
 // for forward compatibility.
 type UpstreamsServer interface {
 	AddUpstream(context.Context, *AddUpstreamRequest) (*emptypb.Empty, error)
+	EditUpstream(context.Context, *EditUpstreamRequest) (*emptypb.Empty, error)
 	ListUpstreams(context.Context, *emptypb.Empty) (*ListUpstreamsResponse, error)
 	mustEmbedUnimplementedUpstreamsServer()
 }
@@ -78,6 +91,9 @@ type UnimplementedUpstreamsServer struct{}
 
 func (UnimplementedUpstreamsServer) AddUpstream(context.Context, *AddUpstreamRequest) (*emptypb.Empty, error) {
 	return nil, status.Error(codes.Unimplemented, "method AddUpstream not implemented")
+}
+func (UnimplementedUpstreamsServer) EditUpstream(context.Context, *EditUpstreamRequest) (*emptypb.Empty, error) {
+	return nil, status.Error(codes.Unimplemented, "method EditUpstream not implemented")
 }
 func (UnimplementedUpstreamsServer) ListUpstreams(context.Context, *emptypb.Empty) (*ListUpstreamsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListUpstreams not implemented")
@@ -121,6 +137,24 @@ func _Upstreams_AddUpstream_Handler(srv interface{}, ctx context.Context, dec fu
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Upstreams_EditUpstream_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(EditUpstreamRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(UpstreamsServer).EditUpstream(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Upstreams_EditUpstream_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(UpstreamsServer).EditUpstream(ctx, req.(*EditUpstreamRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _Upstreams_ListUpstreams_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(emptypb.Empty)
 	if err := dec(in); err != nil {
@@ -149,6 +183,10 @@ var Upstreams_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "AddUpstream",
 			Handler:    _Upstreams_AddUpstream_Handler,
+		},
+		{
+			MethodName: "EditUpstream",
+			Handler:    _Upstreams_EditUpstream_Handler,
 		},
 		{
 			MethodName: "ListUpstreams",

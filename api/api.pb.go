@@ -142,6 +142,98 @@ func (x *AddUpstreamRequest) GetScript() string {
 	return ""
 }
 
+type EditUpstreamRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Name          *string                `protobuf:"bytes,1,req,name=name" json:"name,omitempty"`
+	Password      *string                `protobuf:"bytes,2,req,name=password" json:"password,omitempty"`
+	NewName       *string                `protobuf:"bytes,3,opt,name=new_name,json=newName" json:"new_name,omitempty"`
+	NewPassword   *string                `protobuf:"bytes,4,opt,name=new_password,json=newPassword" json:"new_password,omitempty"`
+	Address       *string                `protobuf:"bytes,5,opt,name=address" json:"address,omitempty"`
+	Login         *string                `protobuf:"bytes,6,opt,name=login" json:"login,omitempty"`
+	Script        *string                `protobuf:"bytes,7,opt,name=script" json:"script,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *EditUpstreamRequest) Reset() {
+	*x = EditUpstreamRequest{}
+	mi := &file_api_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EditUpstreamRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EditUpstreamRequest) ProtoMessage() {}
+
+func (x *EditUpstreamRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_api_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EditUpstreamRequest.ProtoReflect.Descriptor instead.
+func (*EditUpstreamRequest) Descriptor() ([]byte, []int) {
+	return file_api_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *EditUpstreamRequest) GetName() string {
+	if x != nil && x.Name != nil {
+		return *x.Name
+	}
+	return ""
+}
+
+func (x *EditUpstreamRequest) GetPassword() string {
+	if x != nil && x.Password != nil {
+		return *x.Password
+	}
+	return ""
+}
+
+func (x *EditUpstreamRequest) GetNewName() string {
+	if x != nil && x.NewName != nil {
+		return *x.NewName
+	}
+	return ""
+}
+
+func (x *EditUpstreamRequest) GetNewPassword() string {
+	if x != nil && x.NewPassword != nil {
+		return *x.NewPassword
+	}
+	return ""
+}
+
+func (x *EditUpstreamRequest) GetAddress() string {
+	if x != nil && x.Address != nil {
+		return *x.Address
+	}
+	return ""
+}
+
+func (x *EditUpstreamRequest) GetLogin() string {
+	if x != nil && x.Login != nil {
+		return *x.Login
+	}
+	return ""
+}
+
+func (x *EditUpstreamRequest) GetScript() string {
+	if x != nil && x.Script != nil {
+		return *x.Script
+	}
+	return ""
+}
+
 type ListUpstreamsResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Upstreams     []*Upstream            `protobuf:"bytes,1,rep,name=upstreams" json:"upstreams,omitempty"`
@@ -151,7 +243,7 @@ type ListUpstreamsResponse struct {
 
 func (x *ListUpstreamsResponse) Reset() {
 	*x = ListUpstreamsResponse{}
-	mi := &file_api_proto_msgTypes[2]
+	mi := &file_api_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -163,7 +255,7 @@ func (x *ListUpstreamsResponse) String() string {
 func (*ListUpstreamsResponse) ProtoMessage() {}
 
 func (x *ListUpstreamsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_api_proto_msgTypes[2]
+	mi := &file_api_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -176,7 +268,7 @@ func (x *ListUpstreamsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListUpstreamsResponse.ProtoReflect.Descriptor instead.
 func (*ListUpstreamsResponse) Descriptor() ([]byte, []int) {
-	return file_api_proto_rawDescGZIP(), []int{2}
+	return file_api_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *ListUpstreamsResponse) GetUpstreams() []*Upstream {
@@ -198,11 +290,20 @@ const file_api_proto_rawDesc = "" +
 	"\x12AddUpstreamRequest\x12%\n" +
 	"\bupstream\x18\x01 \x02(\v2\t.UpstreamR\bupstream\x12\x1a\n" +
 	"\bpassword\x18\x03 \x02(\tR\bpassword\x12\x16\n" +
-	"\x06script\x18\x04 \x01(\tR\x06script\"@\n" +
+	"\x06script\x18\x04 \x01(\tR\x06script\"\xcb\x01\n" +
+	"\x13EditUpstreamRequest\x12\x12\n" +
+	"\x04name\x18\x01 \x02(\tR\x04name\x12\x1a\n" +
+	"\bpassword\x18\x02 \x02(\tR\bpassword\x12\x19\n" +
+	"\bnew_name\x18\x03 \x01(\tR\anewName\x12!\n" +
+	"\fnew_password\x18\x04 \x01(\tR\vnewPassword\x12\x18\n" +
+	"\aaddress\x18\x05 \x01(\tR\aaddress\x12\x14\n" +
+	"\x05login\x18\x06 \x01(\tR\x05login\x12\x16\n" +
+	"\x06script\x18\a \x01(\tR\x06script\"@\n" +
 	"\x15ListUpstreamsResponse\x12'\n" +
-	"\tupstreams\x18\x01 \x03(\v2\t.UpstreamR\tupstreams2\x8c\x01\n" +
+	"\tupstreams\x18\x01 \x03(\v2\t.UpstreamR\tupstreams2\xcc\x01\n" +
 	"\tUpstreams\x12<\n" +
-	"\vAddUpstream\x12\x13.AddUpstreamRequest\x1a\x16.google.protobuf.Empty\"\x00\x12A\n" +
+	"\vAddUpstream\x12\x13.AddUpstreamRequest\x1a\x16.google.protobuf.Empty\"\x00\x12>\n" +
+	"\fEditUpstream\x12\x14.EditUpstreamRequest\x1a\x16.google.protobuf.Empty\"\x00\x12A\n" +
 	"\rListUpstreams\x12\x16.google.protobuf.Empty\x1a\x16.ListUpstreamsResponse\"\x00B\x1cZ\x1agithub.com/stesla/iris/api"
 
 var (
@@ -217,22 +318,25 @@ func file_api_proto_rawDescGZIP() []byte {
 	return file_api_proto_rawDescData
 }
 
-var file_api_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
+var file_api_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
 var file_api_proto_goTypes = []any{
 	(*Upstream)(nil),              // 0: Upstream
 	(*AddUpstreamRequest)(nil),    // 1: AddUpstreamRequest
-	(*ListUpstreamsResponse)(nil), // 2: ListUpstreamsResponse
-	(*emptypb.Empty)(nil),         // 3: google.protobuf.Empty
+	(*EditUpstreamRequest)(nil),   // 2: EditUpstreamRequest
+	(*ListUpstreamsResponse)(nil), // 3: ListUpstreamsResponse
+	(*emptypb.Empty)(nil),         // 4: google.protobuf.Empty
 }
 var file_api_proto_depIdxs = []int32{
 	0, // 0: AddUpstreamRequest.upstream:type_name -> Upstream
 	0, // 1: ListUpstreamsResponse.upstreams:type_name -> Upstream
 	1, // 2: Upstreams.AddUpstream:input_type -> AddUpstreamRequest
-	3, // 3: Upstreams.ListUpstreams:input_type -> google.protobuf.Empty
-	3, // 4: Upstreams.AddUpstream:output_type -> google.protobuf.Empty
-	2, // 5: Upstreams.ListUpstreams:output_type -> ListUpstreamsResponse
-	4, // [4:6] is the sub-list for method output_type
-	2, // [2:4] is the sub-list for method input_type
+	2, // 3: Upstreams.EditUpstream:input_type -> EditUpstreamRequest
+	4, // 4: Upstreams.ListUpstreams:input_type -> google.protobuf.Empty
+	4, // 5: Upstreams.AddUpstream:output_type -> google.protobuf.Empty
+	4, // 6: Upstreams.EditUpstream:output_type -> google.protobuf.Empty
+	3, // 7: Upstreams.ListUpstreams:output_type -> ListUpstreamsResponse
+	5, // [5:8] is the sub-list for method output_type
+	2, // [2:5] is the sub-list for method input_type
 	2, // [2:2] is the sub-list for extension type_name
 	2, // [2:2] is the sub-list for extension extendee
 	0, // [0:2] is the sub-list for field type_name
@@ -249,7 +353,7 @@ func file_api_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_api_proto_rawDesc), len(file_api_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   3,
+			NumMessages:   4,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
