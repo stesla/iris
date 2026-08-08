@@ -55,6 +55,20 @@ func runApiServer(db *sql.DB) {
 	}
 }
 
+type authrequest interface {
+	GetName() string
+	GetPassword() string
+}
+
+func authenticate(s *apiServer, r authrequest) error {
+	var hash string
+	row := s.db.QueryRow("SELECT bcrypt FROM upstreams WHERE name=?", r.GetName())
+	if err := row.Scan(&hash); err != nil {
+		return err
+	}
+	return bcrypt.CompareHashAndPassword([]byte(hash), []byte(r.GetPassword()))
+}
+
 type apiServer struct {
 	api.UnimplementedUpstreamsServer
 	db *sql.DB
@@ -74,13 +88,18 @@ func (s *apiServer) AddUpstream(_ context.Context, r *api.AddUpstreamRequest) (*
 	return &emptypb.Empty{}, err
 }
 
-func (s *apiServer) EditUpstream(_ context.Context, r *api.EditUpstreamRequest) (*emptypb.Empty, error) {
-	var hash string
-	row := s.db.QueryRow("SELECT bcrypt FROM upstreams WHERE name=?", r.Name)
-	if err := row.Scan(&hash); err != nil {
+func (s *apiServer) DeleteUpstream(_ context.Context, r *api.DeleteUpstreamRequest) (*emptypb.Empty, error) {
+	if err := authenticate(s, r); err != nil {
 		return nil, err
 	}
-	if err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(*r.Password)); err != nil {
+
+	_, err := s.db.Exec("DELETE FROM upstreams WHERE name=?", r.GetName())
+
+	return &emptypb.Empty{}, err
+}
+
+func (s *apiServer) EditUpstream(_ context.Context, r *api.EditUpstreamRequest) (*emptypb.Empty, error) {
+	if err := authenticate(s, r); err != nil {
 		return nil, err
 	}
 

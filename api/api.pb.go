@@ -142,6 +142,58 @@ func (x *AddUpstreamRequest) GetScript() string {
 	return ""
 }
 
+type DeleteUpstreamRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Name          *string                `protobuf:"bytes,1,req,name=name" json:"name,omitempty"`
+	Password      *string                `protobuf:"bytes,2,req,name=password" json:"password,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DeleteUpstreamRequest) Reset() {
+	*x = DeleteUpstreamRequest{}
+	mi := &file_api_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DeleteUpstreamRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DeleteUpstreamRequest) ProtoMessage() {}
+
+func (x *DeleteUpstreamRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_api_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DeleteUpstreamRequest.ProtoReflect.Descriptor instead.
+func (*DeleteUpstreamRequest) Descriptor() ([]byte, []int) {
+	return file_api_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *DeleteUpstreamRequest) GetName() string {
+	if x != nil && x.Name != nil {
+		return *x.Name
+	}
+	return ""
+}
+
+func (x *DeleteUpstreamRequest) GetPassword() string {
+	if x != nil && x.Password != nil {
+		return *x.Password
+	}
+	return ""
+}
+
 type EditUpstreamRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Name          *string                `protobuf:"bytes,1,req,name=name" json:"name,omitempty"`
@@ -157,7 +209,7 @@ type EditUpstreamRequest struct {
 
 func (x *EditUpstreamRequest) Reset() {
 	*x = EditUpstreamRequest{}
-	mi := &file_api_proto_msgTypes[2]
+	mi := &file_api_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -169,7 +221,7 @@ func (x *EditUpstreamRequest) String() string {
 func (*EditUpstreamRequest) ProtoMessage() {}
 
 func (x *EditUpstreamRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_api_proto_msgTypes[2]
+	mi := &file_api_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -182,7 +234,7 @@ func (x *EditUpstreamRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EditUpstreamRequest.ProtoReflect.Descriptor instead.
 func (*EditUpstreamRequest) Descriptor() ([]byte, []int) {
-	return file_api_proto_rawDescGZIP(), []int{2}
+	return file_api_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *EditUpstreamRequest) GetName() string {
@@ -243,7 +295,7 @@ type ListUpstreamsResponse struct {
 
 func (x *ListUpstreamsResponse) Reset() {
 	*x = ListUpstreamsResponse{}
-	mi := &file_api_proto_msgTypes[3]
+	mi := &file_api_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -255,7 +307,7 @@ func (x *ListUpstreamsResponse) String() string {
 func (*ListUpstreamsResponse) ProtoMessage() {}
 
 func (x *ListUpstreamsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_api_proto_msgTypes[3]
+	mi := &file_api_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -268,7 +320,7 @@ func (x *ListUpstreamsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListUpstreamsResponse.ProtoReflect.Descriptor instead.
 func (*ListUpstreamsResponse) Descriptor() ([]byte, []int) {
-	return file_api_proto_rawDescGZIP(), []int{3}
+	return file_api_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *ListUpstreamsResponse) GetUpstreams() []*Upstream {
@@ -290,7 +342,10 @@ const file_api_proto_rawDesc = "" +
 	"\x12AddUpstreamRequest\x12%\n" +
 	"\bupstream\x18\x01 \x02(\v2\t.UpstreamR\bupstream\x12\x1a\n" +
 	"\bpassword\x18\x03 \x02(\tR\bpassword\x12\x16\n" +
-	"\x06script\x18\x04 \x01(\tR\x06script\"\xcb\x01\n" +
+	"\x06script\x18\x04 \x01(\tR\x06script\"G\n" +
+	"\x15DeleteUpstreamRequest\x12\x12\n" +
+	"\x04name\x18\x01 \x02(\tR\x04name\x12\x1a\n" +
+	"\bpassword\x18\x02 \x02(\tR\bpassword\"\xcb\x01\n" +
 	"\x13EditUpstreamRequest\x12\x12\n" +
 	"\x04name\x18\x01 \x02(\tR\x04name\x12\x1a\n" +
 	"\bpassword\x18\x02 \x02(\tR\bpassword\x12\x19\n" +
@@ -300,9 +355,10 @@ const file_api_proto_rawDesc = "" +
 	"\x05login\x18\x06 \x01(\tR\x05login\x12\x16\n" +
 	"\x06script\x18\a \x01(\tR\x06script\"@\n" +
 	"\x15ListUpstreamsResponse\x12'\n" +
-	"\tupstreams\x18\x01 \x03(\v2\t.UpstreamR\tupstreams2\xcc\x01\n" +
+	"\tupstreams\x18\x01 \x03(\v2\t.UpstreamR\tupstreams2\x90\x02\n" +
 	"\tUpstreams\x12<\n" +
-	"\vAddUpstream\x12\x13.AddUpstreamRequest\x1a\x16.google.protobuf.Empty\"\x00\x12>\n" +
+	"\vAddUpstream\x12\x13.AddUpstreamRequest\x1a\x16.google.protobuf.Empty\"\x00\x12B\n" +
+	"\x0eDeleteUpstream\x12\x16.DeleteUpstreamRequest\x1a\x16.google.protobuf.Empty\"\x00\x12>\n" +
 	"\fEditUpstream\x12\x14.EditUpstreamRequest\x1a\x16.google.protobuf.Empty\"\x00\x12A\n" +
 	"\rListUpstreams\x12\x16.google.protobuf.Empty\x1a\x16.ListUpstreamsResponse\"\x00B\x1cZ\x1agithub.com/stesla/iris/api"
 
@@ -318,25 +374,28 @@ func file_api_proto_rawDescGZIP() []byte {
 	return file_api_proto_rawDescData
 }
 
-var file_api_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
+var file_api_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
 var file_api_proto_goTypes = []any{
 	(*Upstream)(nil),              // 0: Upstream
 	(*AddUpstreamRequest)(nil),    // 1: AddUpstreamRequest
-	(*EditUpstreamRequest)(nil),   // 2: EditUpstreamRequest
-	(*ListUpstreamsResponse)(nil), // 3: ListUpstreamsResponse
-	(*emptypb.Empty)(nil),         // 4: google.protobuf.Empty
+	(*DeleteUpstreamRequest)(nil), // 2: DeleteUpstreamRequest
+	(*EditUpstreamRequest)(nil),   // 3: EditUpstreamRequest
+	(*ListUpstreamsResponse)(nil), // 4: ListUpstreamsResponse
+	(*emptypb.Empty)(nil),         // 5: google.protobuf.Empty
 }
 var file_api_proto_depIdxs = []int32{
 	0, // 0: AddUpstreamRequest.upstream:type_name -> Upstream
 	0, // 1: ListUpstreamsResponse.upstreams:type_name -> Upstream
 	1, // 2: Upstreams.AddUpstream:input_type -> AddUpstreamRequest
-	2, // 3: Upstreams.EditUpstream:input_type -> EditUpstreamRequest
-	4, // 4: Upstreams.ListUpstreams:input_type -> google.protobuf.Empty
-	4, // 5: Upstreams.AddUpstream:output_type -> google.protobuf.Empty
-	4, // 6: Upstreams.EditUpstream:output_type -> google.protobuf.Empty
-	3, // 7: Upstreams.ListUpstreams:output_type -> ListUpstreamsResponse
-	5, // [5:8] is the sub-list for method output_type
-	2, // [2:5] is the sub-list for method input_type
+	2, // 3: Upstreams.DeleteUpstream:input_type -> DeleteUpstreamRequest
+	3, // 4: Upstreams.EditUpstream:input_type -> EditUpstreamRequest
+	5, // 5: Upstreams.ListUpstreams:input_type -> google.protobuf.Empty
+	5, // 6: Upstreams.AddUpstream:output_type -> google.protobuf.Empty
+	5, // 7: Upstreams.DeleteUpstream:output_type -> google.protobuf.Empty
+	5, // 8: Upstreams.EditUpstream:output_type -> google.protobuf.Empty
+	4, // 9: Upstreams.ListUpstreams:output_type -> ListUpstreamsResponse
+	6, // [6:10] is the sub-list for method output_type
+	2, // [2:6] is the sub-list for method input_type
 	2, // [2:2] is the sub-list for extension type_name
 	2, // [2:2] is the sub-list for extension extendee
 	0, // [0:2] is the sub-list for field type_name
@@ -353,7 +412,7 @@ func file_api_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_api_proto_rawDesc), len(file_api_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   4,
+			NumMessages:   5,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

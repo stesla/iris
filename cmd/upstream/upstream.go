@@ -36,13 +36,19 @@ func init() {
 	pkgcmd.AddCommand(&cobra.Command{
 		Use:   "add",
 		Short: "add a new upstream",
-		Args:  cobra.ExactArgs(2),
+		Args:  cobra.NoArgs,
 		RunE:  Add,
+	})
+	pkgcmd.AddCommand(&cobra.Command{
+		Use:   "delete NAME PASSWORD",
+		Short: "delete an upstream",
+		Args:  cobra.ExactArgs(2),
+		RunE:  Delete,
 	})
 	pkgcmd.AddCommand(&cobra.Command{
 		Use:   "edit NAME PASSWORD",
 		Short: "edit an existing upstream",
-		Args:  cobra.RangeArgs(2, 3),
+		Args:  cobra.ExactArgs(2),
 		RunE:  Edit,
 	})
 	pkgcmd.AddCommand(&cobra.Command{
@@ -75,6 +81,20 @@ func Add(cmd *cobra.Command, args []string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	_, err = conn.AddUpstream(ctx, req)
+	return err
+}
+
+func Delete(cmd *cobra.Command, args []string) error {
+	req := &api.DeleteUpstreamRequest{
+		Name:     &args[0],
+		Password: &args[1],
+	}
+	conn, err := grpcNew()
+	cobra.CheckErr(err)
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	_, err = conn.DeleteUpstream(ctx, req)
 	return err
 }
 

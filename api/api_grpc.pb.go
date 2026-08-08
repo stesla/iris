@@ -20,9 +20,10 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	Upstreams_AddUpstream_FullMethodName   = "/Upstreams/AddUpstream"
-	Upstreams_EditUpstream_FullMethodName  = "/Upstreams/EditUpstream"
-	Upstreams_ListUpstreams_FullMethodName = "/Upstreams/ListUpstreams"
+	Upstreams_AddUpstream_FullMethodName    = "/Upstreams/AddUpstream"
+	Upstreams_DeleteUpstream_FullMethodName = "/Upstreams/DeleteUpstream"
+	Upstreams_EditUpstream_FullMethodName   = "/Upstreams/EditUpstream"
+	Upstreams_ListUpstreams_FullMethodName  = "/Upstreams/ListUpstreams"
 )
 
 // UpstreamsClient is the client API for Upstreams service.
@@ -30,6 +31,7 @@ const (
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type UpstreamsClient interface {
 	AddUpstream(ctx context.Context, in *AddUpstreamRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
+	DeleteUpstream(ctx context.Context, in *DeleteUpstreamRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
 	EditUpstream(ctx context.Context, in *EditUpstreamRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
 	ListUpstreams(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*ListUpstreamsResponse, error)
 }
@@ -46,6 +48,16 @@ func (c *upstreamsClient) AddUpstream(ctx context.Context, in *AddUpstreamReques
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(emptypb.Empty)
 	err := c.cc.Invoke(ctx, Upstreams_AddUpstream_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *upstreamsClient) DeleteUpstream(ctx context.Context, in *DeleteUpstreamRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(emptypb.Empty)
+	err := c.cc.Invoke(ctx, Upstreams_DeleteUpstream_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -77,6 +89,7 @@ func (c *upstreamsClient) ListUpstreams(ctx context.Context, in *emptypb.Empty, 
 // for forward compatibility.
 type UpstreamsServer interface {
 	AddUpstream(context.Context, *AddUpstreamRequest) (*emptypb.Empty, error)
+	DeleteUpstream(context.Context, *DeleteUpstreamRequest) (*emptypb.Empty, error)
 	EditUpstream(context.Context, *EditUpstreamRequest) (*emptypb.Empty, error)
 	ListUpstreams(context.Context, *emptypb.Empty) (*ListUpstreamsResponse, error)
 	mustEmbedUnimplementedUpstreamsServer()
@@ -91,6 +104,9 @@ type UnimplementedUpstreamsServer struct{}
 
 func (UnimplementedUpstreamsServer) AddUpstream(context.Context, *AddUpstreamRequest) (*emptypb.Empty, error) {
 	return nil, status.Error(codes.Unimplemented, "method AddUpstream not implemented")
+}
+func (UnimplementedUpstreamsServer) DeleteUpstream(context.Context, *DeleteUpstreamRequest) (*emptypb.Empty, error) {
+	return nil, status.Error(codes.Unimplemented, "method DeleteUpstream not implemented")
 }
 func (UnimplementedUpstreamsServer) EditUpstream(context.Context, *EditUpstreamRequest) (*emptypb.Empty, error) {
 	return nil, status.Error(codes.Unimplemented, "method EditUpstream not implemented")
@@ -133,6 +149,24 @@ func _Upstreams_AddUpstream_Handler(srv interface{}, ctx context.Context, dec fu
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(UpstreamsServer).AddUpstream(ctx, req.(*AddUpstreamRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Upstreams_DeleteUpstream_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DeleteUpstreamRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(UpstreamsServer).DeleteUpstream(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Upstreams_DeleteUpstream_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(UpstreamsServer).DeleteUpstream(ctx, req.(*DeleteUpstreamRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -183,6 +217,10 @@ var Upstreams_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "AddUpstream",
 			Handler:    _Upstreams_AddUpstream_Handler,
+		},
+		{
+			MethodName: "DeleteUpstream",
+			Handler:    _Upstreams_DeleteUpstream_Handler,
 		},
 		{
 			MethodName: "EditUpstream",
