@@ -15,6 +15,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 	"google.golang.org/grpc"
 	emptypb "google.golang.org/protobuf/types/known/emptypb"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/stesla/iris/api"
 )
@@ -39,17 +40,24 @@ func Serve(cmd *cobra.Command, args []string) {
 		logger.Level(l)
 	}
 
-	go runApiServer(db)
-	runTelnetProxy(db)
+	sessions := NewSessionPool(db, logger)
+
+	go runApiServer(db, sessions)
+	runTelnetProxy(sessions)
 }
 
-func runApiServer(db *sql.DB) {
+func runApiServer(db *sql.DB, sessions *SessionPool) {
 	l, err := net.Listen("tcp", viper.GetString("grpc.server.addr"))
 	if err != nil {
 		logger.Fatal().Err(err).Msg("error listening on grpc.server.addr")
 	}
 	s := grpc.NewServer()
-	api.RegisterUpstreamsServer(s, &apiServer{db: db})
+	srv := &apiServer{
+		db:       db,
+		sessions: sessions,
+	}
+	api.RegisterSessionsServer(s, srv)
+	api.RegisterUpstreamsServer(s, srv)
 	if err := s.Serve(l); err != nil {
 		logger.Fatal().Err(err).Msg("error serving grpc")
 	}
@@ -70,8 +78,10 @@ func authenticate(s *apiServer, r authrequest) error {
 }
 
 type apiServer struct {
+	api.UnimplementedSessionsServer
 	api.UnimplementedUpstreamsServer
-	db *sql.DB
+	db       *sql.DB
+	sessions *SessionPool
 }
 
 func (s *apiServer) AddUpstream(_ context.Context, r *api.AddUpstreamRequest) (*emptypb.Empty, error) {
@@ -125,6 +135,18 @@ func (s *apiServer) EditUpstream(_ context.Context, r *api.EditUpstreamRequest) 
 	return &emptypb.Empty{}, err
 }
 
+func (s *apiServer) ListSessions(context.Context, *emptypb.Empty) (*api.ListSessionsResponse, error) {
+	s.sessions.RLock()
+	result := &api.ListSessionsResponse{}
+	for key, upstream := range s.sessions.streams {
+		result.Sessions = append(result.Sessions, &api.Session{
+			UpstreamName: &key,
+			TimeStarted:  timestamppb.New(upstream.startedAt),
+		})
+	}
+	return result, nil
+}
+
 func (s *apiServer) ListUpstreams(context.Context, *emptypb.Empty) (*api.ListUpstreamsResponse, error) {
 	rows, err := s.db.Query("SELECT name, address, login FROM upstreams")
 	if err != nil {
@@ -139,9 +161,7 @@ func (s *apiServer) ListUpstreams(context.Context, *emptypb.Empty) (*api.ListUps
 	return result, rows.Err()
 }
 
-func runTelnetProxy(db *sql.DB) {
-	sessions := NewSessionPool(db, logger)
-
+func runTelnetProxy(sessions *SessionPool) {
 	signal.Ignore(os.Interrupt, syscall.SIGHUP, syscall.SIGTERM)
 
 	chReopenSignal := make(chan os.Signal, 1)

@@ -28,7 +28,7 @@ import (
 const readBufSize = 4096
 
 type SessionPool struct {
-	sync.Mutex
+	sync.RWMutex
 	streams map[string]*upstream
 	db      *sql.DB
 	logger  zerolog.Logger
@@ -98,6 +98,7 @@ type telnetSession struct {
 	charset        telnet.CharsetHandler
 	transmitBinary telnet.TransmitBinaryHandler
 	dispatcher     event.Dispatcher
+	startedAt      time.Time
 }
 
 func newSession(conn net.Conn, logger zerolog.Logger) *telnetSession {
@@ -105,6 +106,7 @@ func newSession(conn net.Conn, logger zerolog.Logger) *telnetSession {
 		conn:       telnet.Wrap(context.Background(), conn),
 		logger:     logger,
 		dispatcher: event.NewDispatcher(),
+		startedAt:  time.Now(),
 	}
 	s.conn.RegisterHandler(LogHandler{Logger: s.logger})
 	s.conn.RegisterHandler(&s.transmitBinary)
@@ -271,9 +273,6 @@ type upstream struct {
 const EventConnectUpstream event.Name = "upstream.connect"
 
 func (s *upstream) Connect(addr string) (err error) {
-	if s == nil {
-		return errors.New("you must select an upstream to connect")
-	}
 	s.history, err = newHistory(s.key)
 	if err != nil {
 		return

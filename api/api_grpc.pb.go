@@ -20,6 +20,108 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
+	Sessions_ListSessions_FullMethodName = "/Sessions/ListSessions"
+)
+
+// SessionsClient is the client API for Sessions service.
+//
+// For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
+type SessionsClient interface {
+	ListSessions(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*ListSessionsResponse, error)
+}
+
+type sessionsClient struct {
+	cc grpc.ClientConnInterface
+}
+
+func NewSessionsClient(cc grpc.ClientConnInterface) SessionsClient {
+	return &sessionsClient{cc}
+}
+
+func (c *sessionsClient) ListSessions(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*ListSessionsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListSessionsResponse)
+	err := c.cc.Invoke(ctx, Sessions_ListSessions_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// SessionsServer is the server API for Sessions service.
+// All implementations must embed UnimplementedSessionsServer
+// for forward compatibility.
+type SessionsServer interface {
+	ListSessions(context.Context, *emptypb.Empty) (*ListSessionsResponse, error)
+	mustEmbedUnimplementedSessionsServer()
+}
+
+// UnimplementedSessionsServer must be embedded to have
+// forward compatible implementations.
+//
+// NOTE: this should be embedded by value instead of pointer to avoid a nil
+// pointer dereference when methods are called.
+type UnimplementedSessionsServer struct{}
+
+func (UnimplementedSessionsServer) ListSessions(context.Context, *emptypb.Empty) (*ListSessionsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListSessions not implemented")
+}
+func (UnimplementedSessionsServer) mustEmbedUnimplementedSessionsServer() {}
+func (UnimplementedSessionsServer) testEmbeddedByValue()                  {}
+
+// UnsafeSessionsServer may be embedded to opt out of forward compatibility for this service.
+// Use of this interface is not recommended, as added methods to SessionsServer will
+// result in compilation errors.
+type UnsafeSessionsServer interface {
+	mustEmbedUnimplementedSessionsServer()
+}
+
+func RegisterSessionsServer(s grpc.ServiceRegistrar, srv SessionsServer) {
+	// If the following call panics, it indicates UnimplementedSessionsServer was
+	// embedded by pointer and is nil.  This will cause panics if an
+	// unimplemented method is ever invoked, so we test this at initialization
+	// time to prevent it from happening at runtime later due to I/O.
+	if t, ok := srv.(interface{ testEmbeddedByValue() }); ok {
+		t.testEmbeddedByValue()
+	}
+	s.RegisterService(&Sessions_ServiceDesc, srv)
+}
+
+func _Sessions_ListSessions_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(emptypb.Empty)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SessionsServer).ListSessions(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Sessions_ListSessions_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SessionsServer).ListSessions(ctx, req.(*emptypb.Empty))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+// Sessions_ServiceDesc is the grpc.ServiceDesc for Sessions service.
+// It's only intended for direct use with grpc.RegisterService,
+// and not to be introspected or modified (even as a copy)
+var Sessions_ServiceDesc = grpc.ServiceDesc{
+	ServiceName: "Sessions",
+	HandlerType: (*SessionsServer)(nil),
+	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "ListSessions",
+			Handler:    _Sessions_ListSessions_Handler,
+		},
+	},
+	Streams:  []grpc.StreamDesc{},
+	Metadata: "api.proto",
+}
+
+const (
 	Upstreams_AddUpstream_FullMethodName    = "/Upstreams/AddUpstream"
 	Upstreams_DeleteUpstream_FullMethodName = "/Upstreams/DeleteUpstream"
 	Upstreams_EditUpstream_FullMethodName   = "/Upstreams/EditUpstream"

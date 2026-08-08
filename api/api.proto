@@ -1,12 +1,26 @@
 import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
 
 option go_package = "github.com/stesla/iris/api";
 
+service Sessions {
+  rpc ListSessions(google.protobuf.Empty) returns (ListSessionsResponse) {}
+}
+
+message Session {
+  required string upstream_name = 1;
+  required google.protobuf.Timestamp time_started = 2;
+}
+
+message ListSessionsResponse {
+  repeated Session sessions = 1;
+}
+
 service Upstreams {
-  rpc AddUpstream (AddUpstreamRequest) returns (google.protobuf.Empty) {}
+  rpc AddUpstream(AddUpstreamRequest) returns (google.protobuf.Empty) {}
   rpc DeleteUpstream(DeleteUpstreamRequest) returns (google.protobuf.Empty) {}
   rpc EditUpstream(EditUpstreamRequest) returns (google.protobuf.Empty) {}
-  rpc ListUpstreams (google.protobuf.Empty) returns (ListUpstreamsResponse) {}
+  rpc ListUpstreams(google.protobuf.Empty) returns (ListUpstreamsResponse) {}
 }
 
 message Upstream {

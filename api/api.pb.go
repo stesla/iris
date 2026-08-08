@@ -10,6 +10,7 @@ import (
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	emptypb "google.golang.org/protobuf/types/known/emptypb"
+	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
@@ -22,6 +23,102 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+type Session struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	UpstreamName  *string                `protobuf:"bytes,1,req,name=upstream_name,json=upstreamName" json:"upstream_name,omitempty"`
+	TimeStarted   *timestamppb.Timestamp `protobuf:"bytes,2,req,name=time_started,json=timeStarted" json:"time_started,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Session) Reset() {
+	*x = Session{}
+	mi := &file_api_proto_msgTypes[0]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Session) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Session) ProtoMessage() {}
+
+func (x *Session) ProtoReflect() protoreflect.Message {
+	mi := &file_api_proto_msgTypes[0]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Session.ProtoReflect.Descriptor instead.
+func (*Session) Descriptor() ([]byte, []int) {
+	return file_api_proto_rawDescGZIP(), []int{0}
+}
+
+func (x *Session) GetUpstreamName() string {
+	if x != nil && x.UpstreamName != nil {
+		return *x.UpstreamName
+	}
+	return ""
+}
+
+func (x *Session) GetTimeStarted() *timestamppb.Timestamp {
+	if x != nil {
+		return x.TimeStarted
+	}
+	return nil
+}
+
+type ListSessionsResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Sessions      []*Session             `protobuf:"bytes,1,rep,name=sessions" json:"sessions,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListSessionsResponse) Reset() {
+	*x = ListSessionsResponse{}
+	mi := &file_api_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListSessionsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListSessionsResponse) ProtoMessage() {}
+
+func (x *ListSessionsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_api_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListSessionsResponse.ProtoReflect.Descriptor instead.
+func (*ListSessionsResponse) Descriptor() ([]byte, []int) {
+	return file_api_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *ListSessionsResponse) GetSessions() []*Session {
+	if x != nil {
+		return x.Sessions
+	}
+	return nil
+}
+
 type Upstream struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Name          *string                `protobuf:"bytes,1,req,name=name" json:"name,omitempty"`
@@ -33,7 +130,7 @@ type Upstream struct {
 
 func (x *Upstream) Reset() {
 	*x = Upstream{}
-	mi := &file_api_proto_msgTypes[0]
+	mi := &file_api_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -45,7 +142,7 @@ func (x *Upstream) String() string {
 func (*Upstream) ProtoMessage() {}
 
 func (x *Upstream) ProtoReflect() protoreflect.Message {
-	mi := &file_api_proto_msgTypes[0]
+	mi := &file_api_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -58,7 +155,7 @@ func (x *Upstream) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Upstream.ProtoReflect.Descriptor instead.
 func (*Upstream) Descriptor() ([]byte, []int) {
-	return file_api_proto_rawDescGZIP(), []int{0}
+	return file_api_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *Upstream) GetName() string {
@@ -93,7 +190,7 @@ type AddUpstreamRequest struct {
 
 func (x *AddUpstreamRequest) Reset() {
 	*x = AddUpstreamRequest{}
-	mi := &file_api_proto_msgTypes[1]
+	mi := &file_api_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -105,7 +202,7 @@ func (x *AddUpstreamRequest) String() string {
 func (*AddUpstreamRequest) ProtoMessage() {}
 
 func (x *AddUpstreamRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_api_proto_msgTypes[1]
+	mi := &file_api_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -118,7 +215,7 @@ func (x *AddUpstreamRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AddUpstreamRequest.ProtoReflect.Descriptor instead.
 func (*AddUpstreamRequest) Descriptor() ([]byte, []int) {
-	return file_api_proto_rawDescGZIP(), []int{1}
+	return file_api_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *AddUpstreamRequest) GetUpstream() *Upstream {
@@ -152,7 +249,7 @@ type DeleteUpstreamRequest struct {
 
 func (x *DeleteUpstreamRequest) Reset() {
 	*x = DeleteUpstreamRequest{}
-	mi := &file_api_proto_msgTypes[2]
+	mi := &file_api_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -164,7 +261,7 @@ func (x *DeleteUpstreamRequest) String() string {
 func (*DeleteUpstreamRequest) ProtoMessage() {}
 
 func (x *DeleteUpstreamRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_api_proto_msgTypes[2]
+	mi := &file_api_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -177,7 +274,7 @@ func (x *DeleteUpstreamRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteUpstreamRequest.ProtoReflect.Descriptor instead.
 func (*DeleteUpstreamRequest) Descriptor() ([]byte, []int) {
-	return file_api_proto_rawDescGZIP(), []int{2}
+	return file_api_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *DeleteUpstreamRequest) GetName() string {
@@ -209,7 +306,7 @@ type EditUpstreamRequest struct {
 
 func (x *EditUpstreamRequest) Reset() {
 	*x = EditUpstreamRequest{}
-	mi := &file_api_proto_msgTypes[3]
+	mi := &file_api_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -221,7 +318,7 @@ func (x *EditUpstreamRequest) String() string {
 func (*EditUpstreamRequest) ProtoMessage() {}
 
 func (x *EditUpstreamRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_api_proto_msgTypes[3]
+	mi := &file_api_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -234,7 +331,7 @@ func (x *EditUpstreamRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EditUpstreamRequest.ProtoReflect.Descriptor instead.
 func (*EditUpstreamRequest) Descriptor() ([]byte, []int) {
-	return file_api_proto_rawDescGZIP(), []int{3}
+	return file_api_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *EditUpstreamRequest) GetName() string {
@@ -295,7 +392,7 @@ type ListUpstreamsResponse struct {
 
 func (x *ListUpstreamsResponse) Reset() {
 	*x = ListUpstreamsResponse{}
-	mi := &file_api_proto_msgTypes[4]
+	mi := &file_api_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -307,7 +404,7 @@ func (x *ListUpstreamsResponse) String() string {
 func (*ListUpstreamsResponse) ProtoMessage() {}
 
 func (x *ListUpstreamsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_api_proto_msgTypes[4]
+	mi := &file_api_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -320,7 +417,7 @@ func (x *ListUpstreamsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListUpstreamsResponse.ProtoReflect.Descriptor instead.
 func (*ListUpstreamsResponse) Descriptor() ([]byte, []int) {
-	return file_api_proto_rawDescGZIP(), []int{4}
+	return file_api_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *ListUpstreamsResponse) GetUpstreams() []*Upstream {
@@ -334,7 +431,12 @@ var File_api_proto protoreflect.FileDescriptor
 
 const file_api_proto_rawDesc = "" +
 	"\n" +
-	"\tapi.proto\x1a\x1bgoogle/protobuf/empty.proto\"N\n" +
+	"\tapi.proto\x1a\x1bgoogle/protobuf/empty.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"m\n" +
+	"\aSession\x12#\n" +
+	"\rupstream_name\x18\x01 \x02(\tR\fupstreamName\x12=\n" +
+	"\ftime_started\x18\x02 \x02(\v2\x1a.google.protobuf.TimestampR\vtimeStarted\"<\n" +
+	"\x14ListSessionsResponse\x12$\n" +
+	"\bsessions\x18\x01 \x03(\v2\b.SessionR\bsessions\"N\n" +
 	"\bUpstream\x12\x12\n" +
 	"\x04name\x18\x01 \x02(\tR\x04name\x12\x18\n" +
 	"\aaddress\x18\x02 \x02(\tR\aaddress\x12\x14\n" +
@@ -355,7 +457,9 @@ const file_api_proto_rawDesc = "" +
 	"\x05login\x18\x06 \x01(\tR\x05login\x12\x16\n" +
 	"\x06script\x18\a \x01(\tR\x06script\"@\n" +
 	"\x15ListUpstreamsResponse\x12'\n" +
-	"\tupstreams\x18\x01 \x03(\v2\t.UpstreamR\tupstreams2\x90\x02\n" +
+	"\tupstreams\x18\x01 \x03(\v2\t.UpstreamR\tupstreams2K\n" +
+	"\bSessions\x12?\n" +
+	"\fListSessions\x12\x16.google.protobuf.Empty\x1a\x15.ListSessionsResponse\"\x002\x90\x02\n" +
 	"\tUpstreams\x12<\n" +
 	"\vAddUpstream\x12\x13.AddUpstreamRequest\x1a\x16.google.protobuf.Empty\"\x00\x12B\n" +
 	"\x0eDeleteUpstream\x12\x16.DeleteUpstreamRequest\x1a\x16.google.protobuf.Empty\"\x00\x12>\n" +
@@ -374,31 +478,38 @@ func file_api_proto_rawDescGZIP() []byte {
 	return file_api_proto_rawDescData
 }
 
-var file_api_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
+var file_api_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
 var file_api_proto_goTypes = []any{
-	(*Upstream)(nil),              // 0: Upstream
-	(*AddUpstreamRequest)(nil),    // 1: AddUpstreamRequest
-	(*DeleteUpstreamRequest)(nil), // 2: DeleteUpstreamRequest
-	(*EditUpstreamRequest)(nil),   // 3: EditUpstreamRequest
-	(*ListUpstreamsResponse)(nil), // 4: ListUpstreamsResponse
-	(*emptypb.Empty)(nil),         // 5: google.protobuf.Empty
+	(*Session)(nil),               // 0: Session
+	(*ListSessionsResponse)(nil),  // 1: ListSessionsResponse
+	(*Upstream)(nil),              // 2: Upstream
+	(*AddUpstreamRequest)(nil),    // 3: AddUpstreamRequest
+	(*DeleteUpstreamRequest)(nil), // 4: DeleteUpstreamRequest
+	(*EditUpstreamRequest)(nil),   // 5: EditUpstreamRequest
+	(*ListUpstreamsResponse)(nil), // 6: ListUpstreamsResponse
+	(*timestamppb.Timestamp)(nil), // 7: google.protobuf.Timestamp
+	(*emptypb.Empty)(nil),         // 8: google.protobuf.Empty
 }
 var file_api_proto_depIdxs = []int32{
-	0, // 0: AddUpstreamRequest.upstream:type_name -> Upstream
-	0, // 1: ListUpstreamsResponse.upstreams:type_name -> Upstream
-	1, // 2: Upstreams.AddUpstream:input_type -> AddUpstreamRequest
-	2, // 3: Upstreams.DeleteUpstream:input_type -> DeleteUpstreamRequest
-	3, // 4: Upstreams.EditUpstream:input_type -> EditUpstreamRequest
-	5, // 5: Upstreams.ListUpstreams:input_type -> google.protobuf.Empty
-	5, // 6: Upstreams.AddUpstream:output_type -> google.protobuf.Empty
-	5, // 7: Upstreams.DeleteUpstream:output_type -> google.protobuf.Empty
-	5, // 8: Upstreams.EditUpstream:output_type -> google.protobuf.Empty
-	4, // 9: Upstreams.ListUpstreams:output_type -> ListUpstreamsResponse
-	6, // [6:10] is the sub-list for method output_type
-	2, // [2:6] is the sub-list for method input_type
-	2, // [2:2] is the sub-list for extension type_name
-	2, // [2:2] is the sub-list for extension extendee
-	0, // [0:2] is the sub-list for field type_name
+	7, // 0: Session.time_started:type_name -> google.protobuf.Timestamp
+	0, // 1: ListSessionsResponse.sessions:type_name -> Session
+	2, // 2: AddUpstreamRequest.upstream:type_name -> Upstream
+	2, // 3: ListUpstreamsResponse.upstreams:type_name -> Upstream
+	8, // 4: Sessions.ListSessions:input_type -> google.protobuf.Empty
+	3, // 5: Upstreams.AddUpstream:input_type -> AddUpstreamRequest
+	4, // 6: Upstreams.DeleteUpstream:input_type -> DeleteUpstreamRequest
+	5, // 7: Upstreams.EditUpstream:input_type -> EditUpstreamRequest
+	8, // 8: Upstreams.ListUpstreams:input_type -> google.protobuf.Empty
+	1, // 9: Sessions.ListSessions:output_type -> ListSessionsResponse
+	8, // 10: Upstreams.AddUpstream:output_type -> google.protobuf.Empty
+	8, // 11: Upstreams.DeleteUpstream:output_type -> google.protobuf.Empty
+	8, // 12: Upstreams.EditUpstream:output_type -> google.protobuf.Empty
+	6, // 13: Upstreams.ListUpstreams:output_type -> ListUpstreamsResponse
+	9, // [9:14] is the sub-list for method output_type
+	4, // [4:9] is the sub-list for method input_type
+	4, // [4:4] is the sub-list for extension type_name
+	4, // [4:4] is the sub-list for extension extendee
+	0, // [0:4] is the sub-list for field type_name
 }
 
 func init() { file_api_proto_init() }
@@ -412,9 +523,9 @@ func file_api_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_api_proto_rawDesc), len(file_api_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   5,
+			NumMessages:   7,
 			NumExtensions: 0,
-			NumServices:   1,
+			NumServices:   2,
 		},
 		GoTypes:           file_api_proto_goTypes,
 		DependencyIndexes: file_api_proto_depIdxs,

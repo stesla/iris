@@ -7,6 +7,7 @@ import (
 	"github.com/spf13/viper"
 
 	"github.com/stesla/iris/cmd/serve"
+	"github.com/stesla/iris/cmd/session"
 	"github.com/stesla/iris/cmd/upstream"
 )
 
@@ -31,6 +32,7 @@ func init() {
 	viper.SetDefault("log.level", "info")
 	viper.SetDefault("log.dir", "./logs")
 
+	session.AddToCommand(rootCmd)
 	serve.AddToCommand(rootCmd)
 	upstream.AddToCommand(rootCmd)
 }
