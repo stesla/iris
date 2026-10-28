@@ -4,7 +4,7 @@
 // 	protoc        v7.36.0--rc2
 // source: api.proto
 
-package api
+package pb
 
 import (
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
@@ -464,7 +464,7 @@ const file_api_proto_rawDesc = "" +
 	"\vAddUpstream\x12\x13.AddUpstreamRequest\x1a\x16.google.protobuf.Empty\"\x00\x12B\n" +
 	"\x0eDeleteUpstream\x12\x16.DeleteUpstreamRequest\x1a\x16.google.protobuf.Empty\"\x00\x12>\n" +
 	"\fEditUpstream\x12\x14.EditUpstreamRequest\x1a\x16.google.protobuf.Empty\"\x00\x12A\n" +
-	"\rListUpstreams\x12\x16.google.protobuf.Empty\x1a\x16.ListUpstreamsResponse\"\x00B\x1cZ\x1agithub.com/stesla/iris/api"
+	"\rListUpstreams\x12\x16.google.protobuf.Empty\x1a\x16.ListUpstreamsResponse\"\x00B\x1fZ\x1dgithub.com/stesla/iris/api/pb"
 
 var (
 	file_api_proto_rawDescOnce sync.Once

@@ -1,7 +1,7 @@
 import "google/protobuf/empty.proto";
 import "google/protobuf/timestamp.proto";
 
-option go_package = "github.com/stesla/iris/api";
+option go_package = "github.com/stesla/iris/api/pb";
 
 service Sessions {
   rpc ListSessions(google.protobuf.Empty) returns (ListSessionsResponse) {}

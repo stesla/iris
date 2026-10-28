@@ -12,7 +12,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	"github.com/stesla/iris/api"
+	"github.com/stesla/iris/api/pb"
 )
 
 var (
@@ -64,8 +64,8 @@ func AddToCommand(cmd *cobra.Command) {
 }
 
 func Add(cmd *cobra.Command, args []string) error {
-	req := &api.AddUpstreamRequest{
-		Upstream: &api.Upstream{
+	req := &pb.AddUpstreamRequest{
+		Upstream: &pb.Upstream{
 			Name:    &args[0],
 			Address: &address,
 			Login:   &login,
@@ -85,7 +85,7 @@ func Add(cmd *cobra.Command, args []string) error {
 }
 
 func Delete(cmd *cobra.Command, args []string) error {
-	req := &api.DeleteUpstreamRequest{
+	req := &pb.DeleteUpstreamRequest{
 		Name:     &args[0],
 		Password: &args[1],
 	}
@@ -99,7 +99,7 @@ func Delete(cmd *cobra.Command, args []string) error {
 }
 
 func Edit(cmd *cobra.Command, args []string) error {
-	req := &api.EditUpstreamRequest{
+	req := &pb.EditUpstreamRequest{
 		Name:     &args[0],
 		Password: &args[1],
 	}
@@ -141,10 +141,10 @@ func List(cmd *cobra.Command, args []string) {
 	}
 }
 
-func grpcNew() (api.UpstreamsClient, error) {
+func grpcNew() (pb.UpstreamsClient, error) {
 	conn, err := grpc.NewClient(
 		viper.GetString("grpc.client.addr"),
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 	)
-	return api.NewUpstreamsClient(conn), err
+	return pb.NewUpstreamsClient(conn), err
 }

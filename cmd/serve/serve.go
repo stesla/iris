@@ -18,7 +18,7 @@ import (
 	emptypb "google.golang.org/protobuf/types/known/emptypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	"github.com/stesla/iris/api"
+	"github.com/stesla/iris/api/pb"
 )
 
 var logger = zerolog.New(os.Stdout)
@@ -57,8 +57,8 @@ func runApiServer(db *sql.DB, sessions *SessionPool) {
 		db:       db,
 		sessions: sessions,
 	}
-	api.RegisterSessionsServer(s, srv)
-	api.RegisterUpstreamsServer(s, srv)
+	pb.RegisterSessionsServer(s, srv)
+	pb.RegisterUpstreamsServer(s, srv)
 	if err := s.Serve(l); err != nil {
 		logger.Fatal().Err(err).Msg("error serving grpc")
 	}
@@ -79,13 +79,13 @@ func authenticate(s *apiServer, r authrequest) error {
 }
 
 type apiServer struct {
-	api.UnimplementedSessionsServer
-	api.UnimplementedUpstreamsServer
+	pb.UnimplementedSessionsServer
+	pb.UnimplementedUpstreamsServer
 	db       *sql.DB
 	sessions *SessionPool
 }
 
-func (s *apiServer) AddUpstream(_ context.Context, r *api.AddUpstreamRequest) (*emptypb.Empty, error) {
+func (s *apiServer) AddUpstream(_ context.Context, r *pb.AddUpstreamRequest) (*emptypb.Empty, error) {
 	hash, err := bcrypt.GenerateFromPassword([]byte(*r.Password), bcrypt.DefaultCost)
 	if err != nil {
 		return nil, err
@@ -99,7 +99,7 @@ func (s *apiServer) AddUpstream(_ context.Context, r *api.AddUpstreamRequest) (*
 	return &emptypb.Empty{}, err
 }
 
-func (s *apiServer) DeleteUpstream(_ context.Context, r *api.DeleteUpstreamRequest) (*emptypb.Empty, error) {
+func (s *apiServer) DeleteUpstream(_ context.Context, r *pb.DeleteUpstreamRequest) (*emptypb.Empty, error) {
 	if err := authenticate(s, r); err != nil {
 		return nil, err
 	}
@@ -109,7 +109,7 @@ func (s *apiServer) DeleteUpstream(_ context.Context, r *api.DeleteUpstreamReque
 	return &emptypb.Empty{}, err
 }
 
-func (s *apiServer) EditUpstream(_ context.Context, r *api.EditUpstreamRequest) (*emptypb.Empty, error) {
+func (s *apiServer) EditUpstream(_ context.Context, r *pb.EditUpstreamRequest) (*emptypb.Empty, error) {
 	if err := authenticate(s, r); err != nil {
 		return nil, err
 	}
@@ -152,12 +152,12 @@ func (s *apiServer) EditUpstream(_ context.Context, r *api.EditUpstreamRequest) 
 	return &emptypb.Empty{}, err
 }
 
-func (s *apiServer) ListSessions(context.Context, *emptypb.Empty) (*api.ListSessionsResponse, error) {
+func (s *apiServer) ListSessions(context.Context, *emptypb.Empty) (*pb.ListSessionsResponse, error) {
 	s.sessions.RLock()
 	defer s.sessions.RUnlock()
-	result := &api.ListSessionsResponse{}
+	result := &pb.ListSessionsResponse{}
 	for key, upstream := range s.sessions.streams {
-		result.Sessions = append(result.Sessions, &api.Session{
+		result.Sessions = append(result.Sessions, &pb.Session{
 			UpstreamName: &key,
 			TimeStarted:  timestamppb.New(upstream.startedAt),
 		})
@@ -165,15 +165,15 @@ func (s *apiServer) ListSessions(context.Context, *emptypb.Empty) (*api.ListSess
 	return result, nil
 }
 
-func (s *apiServer) ListUpstreams(context.Context, *emptypb.Empty) (*api.ListUpstreamsResponse, error) {
+func (s *apiServer) ListUpstreams(context.Context, *emptypb.Empty) (*pb.ListUpstreamsResponse, error) {
 	rows, err := s.db.Query("SELECT name, address, login FROM upstreams")
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	result := &api.ListUpstreamsResponse{}
+	result := &pb.ListUpstreamsResponse{}
 	for rows.Next() {
-		upstream := &api.Upstream{}
+		upstream := &pb.Upstream{}
 		if err := rows.Scan(&upstream.Name, &upstream.Address, &upstream.Login); err != nil {
 			return nil, err
 		}
