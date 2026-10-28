@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -113,23 +114,39 @@ func (s *apiServer) EditUpstream(_ context.Context, r *api.EditUpstreamRequest) 
 		return nil, err
 	}
 
-	query := "UPDATE upstreams SET"
-	args := []any{}
-	fields := map[string]*string{
-		"name":     r.NewName,
-		"password": r.NewPassword,
-		"address":  r.Address,
-		"login":    r.Login,
-		"script":   r.Script,
+	var sets []string
+	var args []any
+	set := func(column string, value any) {
+		sets = append(sets, column+"=?")
+		args = append(args, value)
 	}
-	for field, value := range fields {
-		if value != nil {
-			query += " " + field + "=?"
-			args = append(args, *value)
+
+	if r.NewName != nil {
+		set("name", r.GetNewName())
+	}
+	if r.NewPassword != nil {
+		hash, err := bcrypt.GenerateFromPassword([]byte(r.GetNewPassword()), bcrypt.DefaultCost)
+		if err != nil {
+			return nil, err
 		}
+		set("bcrypt", hash)
 	}
-	query += " WHERE name=?"
-	args = append(args, *r.Name)
+	if r.Address != nil {
+		set("address", r.GetAddress())
+	}
+	if r.Login != nil {
+		set("login", r.GetLogin())
+	}
+	if r.Script != nil {
+		set("script", r.GetScript())
+	}
+
+	if len(sets) == 0 {
+		return &emptypb.Empty{}, nil
+	}
+
+	query := "UPDATE upstreams SET " + strings.Join(sets, ", ") + " WHERE name=?"
+	args = append(args, r.GetName())
 
 	_, err := s.db.Exec(query, args...)
 	return &emptypb.Empty{}, err
@@ -137,6 +154,7 @@ func (s *apiServer) EditUpstream(_ context.Context, r *api.EditUpstreamRequest) 
 
 func (s *apiServer) ListSessions(context.Context, *emptypb.Empty) (*api.ListSessionsResponse, error) {
 	s.sessions.RLock()
+	defer s.sessions.RUnlock()
 	result := &api.ListSessionsResponse{}
 	for key, upstream := range s.sessions.streams {
 		result.Sessions = append(result.Sessions, &api.Session{
@@ -152,10 +170,13 @@ func (s *apiServer) ListUpstreams(context.Context, *emptypb.Empty) (*api.ListUps
 	if err != nil {
 		return nil, err
 	}
+	defer rows.Close()
 	result := &api.ListUpstreamsResponse{}
 	for rows.Next() {
 		upstream := &api.Upstream{}
-		rows.Scan(&upstream.Name, &upstream.Address, &upstream.Login)
+		if err := rows.Scan(&upstream.Name, &upstream.Address, &upstream.Login); err != nil {
+			return nil, err
+		}
 		result.Upstreams = append(result.Upstreams, upstream)
 	}
 	return result, rows.Err()
