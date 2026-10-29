@@ -3,22 +3,24 @@ package upstream
 import (
 	"context"
 	"fmt"
+	"os"
+	"text/tabwriter"
 	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/protobuf/types/known/emptypb"
-
-	"github.com/stesla/iris/api/pb"
+	"github.com/stesla/iris/api"
 )
 
 var (
 	pkgcmd = &cobra.Command{
 		Use:   "upstream [OPTIONS] COMMAND",
 		Short: "commands for managing upstreams",
+		PersistentPreRun: func(cmd *cobra.Command, args []string) {
+			// args have been validated by now, so any error is from the server
+			cmd.SilenceUsage = true
+		},
 	}
 	address     string
 	login       string
@@ -34,9 +36,9 @@ func init() {
 	pkgcmd.PersistentFlags().StringVarP(&newPassword, "password", "p", "", "password for upstream session")
 	pkgcmd.PersistentFlags().StringVarP(&script, "script", "s", "", "connect script")
 	pkgcmd.AddCommand(&cobra.Command{
-		Use:   "add",
+		Use:   "add NAME PASSWORD",
 		Short: "add a new upstream",
-		Args:  cobra.NoArgs,
+		Args:  cobra.ExactArgs(2),
 		RunE:  Add,
 	})
 	pkgcmd.AddCommand(&cobra.Command{
@@ -55,7 +57,7 @@ func init() {
 		Use:   "list",
 		Short: "list all upstreams",
 		Args:  cobra.NoArgs,
-		Run:   List,
+		RunE:  List,
 	})
 }
 
@@ -64,45 +66,29 @@ func AddToCommand(cmd *cobra.Command) {
 }
 
 func Add(cmd *cobra.Command, args []string) error {
-	req := &pb.AddUpstreamRequest{
-		Upstream: &pb.Upstream{
-			Name:    &args[0],
-			Address: &address,
-			Login:   &login,
-		},
-		Password: &args[1],
+	req := &api.AddUpstreamRequest{
+		Name:     args[0],
+		Address:  address,
+		Login:    login,
+		Password: args[1],
 	}
 	if script != "" {
 		req.Script = &script
 	}
-	conn, err := grpcNew()
-	cobra.CheckErr(err)
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	_, err = conn.AddUpstream(ctx, req)
-	return err
+	return newClient().AddUpstream(ctx, req)
 }
 
 func Delete(cmd *cobra.Command, args []string) error {
-	req := &pb.DeleteUpstreamRequest{
-		Name:     &args[0],
-		Password: &args[1],
-	}
-	conn, err := grpcNew()
-	cobra.CheckErr(err)
-
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	_, err = conn.DeleteUpstream(ctx, req)
-	return err
+	return newClient().DeleteUpstream(ctx, args[0], args[1])
 }
 
 func Edit(cmd *cobra.Command, args []string) error {
-	req := &pb.EditUpstreamRequest{
-		Name:     &args[0],
-		Password: &args[1],
-	}
+	req := &api.EditUpstreamRequest{}
 	if address != "" {
 		req.Address = &address
 	}
@@ -119,32 +105,27 @@ func Edit(cmd *cobra.Command, args []string) error {
 		req.Script = &script
 	}
 
-	conn, err := grpcNew()
-	cobra.CheckErr(err)
-
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	_, err = conn.EditUpstream(ctx, req)
-	return err
+	return newClient().EditUpstream(ctx, args[0], args[1], req)
 }
 
-func List(cmd *cobra.Command, args []string) {
-	conn, err := grpcNew()
-	cobra.CheckErr(err)
-
+func List(cmd *cobra.Command, args []string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	resp, err := conn.ListUpstreams(ctx, &emptypb.Empty{})
-	cobra.CheckErr(err)
-	for _, name := range resp.Upstreams {
-		fmt.Println(name)
+	upstreams, err := newClient().ListUpstreams(ctx)
+	if err != nil {
+		return err
 	}
+
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(w, "NAME\tADDRESS\tLOGIN")
+	for _, u := range upstreams {
+		fmt.Fprintf(w, "%s\t%s\t%s\n", u.Name, u.Address, u.Login)
+	}
+	return w.Flush()
 }
 
-func grpcNew() (pb.UpstreamsClient, error) {
-	conn, err := grpc.NewClient(
-		viper.GetString("grpc.client.addr"),
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-	)
-	return pb.NewUpstreamsClient(conn), err
+func newClient() *api.Client {
+	return api.NewClient(viper.GetString("api.client.url"))
 }
