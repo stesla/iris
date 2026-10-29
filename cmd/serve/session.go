@@ -65,6 +65,10 @@ func (p *SessionPool) ReopenHistories() {
 	p.Lock()
 	defer p.Unlock()
 	for _, session := range p.streams {
+		// upstreams that are still connecting have no history yet
+		if session.history == nil {
+			continue
+		}
 		if err := session.history.Reopen(); err != nil {
 			session.Close()
 			p.logger.Error().Err(err).Str("session-key", session.key).Msg("error reloading history")
@@ -84,6 +88,17 @@ func (p *SessionPool) upstreamForKey(key string) *upstream {
 		}
 	}
 	return p.streams[key]
+}
+
+// removeUnconnected removes u from the pool if it is still there and never
+// finished connecting, so a failed connection attempt doesn't leave it behind.
+func (p *SessionPool) removeUnconnected(u *upstream) {
+	p.Lock()
+	defer p.Unlock()
+	if p.streams[u.key] == u && !u.IsConnected() {
+		delete(p.streams, u.key)
+		u.Close()
+	}
 }
 
 func (p *SessionPool) deleteUpstreamWithKey(key string) {
@@ -193,30 +208,48 @@ func (s *downstream) Listen(_ context.Context, ev event.Event) error {
 	return nil
 }
 
-func (s *downstream) connectNewUpstream() error {
-	var address, login, hash string
-	var script sql.NullString
-	row := s.pool.db.QueryRow("SELECT address, login, bcrypt, script FROM upstreams WHERE name=?", s.Name)
-	if err := row.Scan(&address, &login, &hash, &script); err != nil {
-		return err
+type upstreamConfig struct {
+	address string
+	login   string
+	script  sql.NullString
+}
+
+// authenticateUpstream returns sql.ErrNoRows if the upstream doesn't exist and
+// bcrypt.ErrMismatchedHashAndPassword if the password is wrong.
+func authenticateUpstream(ctx context.Context, db *sql.DB, name, password string) (*upstreamConfig, error) {
+	var config upstreamConfig
+	var hash string
+	row := db.QueryRowContext(ctx, "SELECT address, login, bcrypt, script FROM upstreams WHERE name=?", name)
+	if err := row.Scan(&config.address, &config.login, &hash, &config.script); err != nil {
+		return nil, err
 	}
-	if err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(s.Password)); err != nil {
-		return err
+	if err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)); err != nil {
+		return nil, err
+	}
+	return &config, nil
+}
+
+func (s *downstream) connectNewUpstream(config *upstreamConfig) error {
+	for option, value := range s.Options {
+		if err := s.upstream.setOption(option, value); err != nil {
+			return err
+		}
 	}
 
+	address := config.address
 	fmt.Fprintf(s, "connecting to %v...", address)
 	if err := s.upstream.Connect(address); err != nil {
 		return fmt.Errorf("error connecting (%v): %w", address, err)
 	}
 
 	var connectScript string
-	if script.Valid {
-		connectScript = script.String
+	if config.script.Valid {
+		connectScript = config.script.String
 	} else {
 		connectScript = "connect %LOGIN% %PASSWORD%"
 	}
 
-	connectScript = strings.ReplaceAll(connectScript, "%LOGIN%", login)
+	connectScript = strings.ReplaceAll(connectScript, "%LOGIN%", config.login)
 	connectScript = strings.ReplaceAll(connectScript, "%PASSWORD%", s.Password)
 	if _, err := s.upstream.Write([]byte(connectScript + "\n")); err != nil {
 		return fmt.Errorf("error writing to (%v): %w", address, err)
@@ -230,17 +263,22 @@ func (s *downstream) connectUpstream() error {
 	if err := decoder.Decode(&s); err != nil {
 		return err
 	}
+
+	config, err := authenticateUpstream(s.Context(), s.pool.db, s.Name, s.Password)
+	if err != nil {
+		return err
+	}
+
 	s.upstream = s.pool.upstreamForKey(s.Name)
 	s.upstream.AddDownstream(s)
 	if s.upstream.IsConnected() {
 		s.dispatcher.Listen(EventCharsetResolved, s)
-	} else {
-		for option, value := range s.Options {
-			if err := s.upstream.setOption(option, value); err != nil {
-				return err
-			}
-		}
-		return s.connectNewUpstream()
+		return nil
+	}
+
+	if err := s.connectNewUpstream(config); err != nil {
+		s.pool.removeUnconnected(s.upstream)
+		return err
 	}
 	return nil
 }
@@ -304,7 +342,9 @@ func (s *upstream) Close() error {
 	for _, wc := range s.downstream {
 		wc.Close()
 	}
-	s.telnetSession.Close()
+	if s.telnetSession != nil {
+		s.telnetSession.Close()
+	}
 	return nil
 }
 

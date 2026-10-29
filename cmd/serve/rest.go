@@ -100,12 +100,8 @@ func (s *apiServer) handleDeleteUpstream(w http.ResponseWriter, r *http.Request)
 }
 
 func (s *apiServer) authenticate(ctx context.Context, name, password string) error {
-	var hash string
-	row := s.db.QueryRowContext(ctx, "SELECT bcrypt FROM upstreams WHERE name=?", name)
-	if err := row.Scan(&hash); err != nil {
-		return err
-	}
-	return bcrypt.CompareHashAndPassword([]byte(hash), []byte(password))
+	_, err := authenticateUpstream(ctx, s.db, name, password)
+	return err
 }
 
 func (s *apiServer) listSessions() []api.Session {
