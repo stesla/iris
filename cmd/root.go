@@ -27,7 +27,7 @@ func init() {
 	viper.SetDefault("addr", ":4042")
 	viper.SetDefault("db", "./iris.db")
 	viper.SetDefault("grpc.client.addr", "localhost:40042")
-	viper.SetDefault("grpc.server.addr", ":40042")
+	viper.SetDefault("api.server.addr", "localhost:40042")
 	viper.SetDefault("log.level", "info")
 	viper.SetDefault("log.dir", "./logs")
 
