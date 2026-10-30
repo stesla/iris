@@ -54,7 +54,7 @@ Phase 2: Standalone bugs
 - [x] 3. `exit cleanly on shutdown`
 - [x] 4. `honor IRIS_CONFIG`
 - [x] 5. `register upstream flags per subcommand`
-- [ ] 6. `allow clearing an upstream's connect script`
+- [x] 6. `allow clearing an upstream's connect script`
 
 Phase 3: Log file
 - [ ] 7. `guard logFile with a lock`

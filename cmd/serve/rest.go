@@ -158,7 +158,7 @@ func (s *apiServer) addUpstream(ctx context.Context, r *api.AddUpstreamRequest) 
 	// once the row exists
 	res, err := tx.ExecContext(ctx,
 		"INSERT INTO upstreams (name, address, login, script) VALUES (?, ?, ?, ?)",
-		r.Name, r.Address, r.Login, r.Script,
+		r.Name, r.Address, r.Login, scriptColumn(r.Script),
 	)
 	if err != nil {
 		return err
@@ -172,6 +172,15 @@ func (s *apiServer) addUpstream(ctx context.Context, r *api.AddUpstreamRequest) 
 		return err
 	}
 	return tx.Commit()
+}
+
+// scriptColumn returns the value to store for a connect script: NULL, which
+// means the default, if it is missing or empty.
+func scriptColumn(script *string) any {
+	if script == nil || *script == "" {
+		return nil
+	}
+	return *script
 }
 
 func (s *apiServer) deleteUpstream(ctx context.Context, name string) error {
@@ -216,7 +225,7 @@ func (s *apiServer) editUpstream(ctx context.Context, name string, r *api.EditUp
 		set("login", *r.Login)
 	}
 	if r.Script != nil {
-		set("script", *r.Script)
+		set("script", scriptColumn(r.Script))
 	}
 
 	if len(sets) == 0 {

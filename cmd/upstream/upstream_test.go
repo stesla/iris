@@ -184,6 +184,52 @@ func TestEditEmptyPasswordFromStdin(t *testing.T) {
 	require.Empty(t, *requests)
 }
 
+func TestEditClearScript(t *testing.T) {
+	for _, flag := range [][]string{{"-s", ""}, {"--script="}} {
+		requests := newTestServer(t, http.StatusNoContent, "")
+		setStdin(t, "")
+
+		require.NoError(t, run(t, append([]string{"edit", "game"}, flag...)...))
+		require.Len(t, *requests, 1, "%v", flag)
+		require.JSONEq(t, `{"script":""}`, (*requests)[0].body, "%v", flag)
+	}
+}
+
+func TestEditNoFlagsChangesNothing(t *testing.T) {
+	requests := newTestServer(t, http.StatusNoContent, "")
+	setStdin(t, "")
+
+	require.NoError(t, run(t, "edit", "game"))
+	require.Len(t, *requests, 1)
+	require.JSONEq(t, `{}`, (*requests)[0].body)
+}
+
+func TestEditEmptyFlagRejected(t *testing.T) {
+	for flag, want := range map[string]string{
+		"-a": "address cannot be empty",
+		"-l": "login cannot be empty",
+		"-n": "new_name cannot be empty",
+		"-p": "password cannot be empty",
+	} {
+		requests := newTestServer(t, http.StatusNoContent, "")
+		setStdin(t, "")
+
+		require.ErrorContains(t, run(t, "edit", "game", flag, ""), want, flag)
+		require.Empty(t, *requests, flag)
+	}
+}
+
+func TestAddEmptyScript(t *testing.T) {
+	requests := newTestServer(t, http.StatusCreated, "")
+	setStdin(t, "")
+
+	require.NoError(t, run(t, "add", "game", "-a", "example.com:4201", "-l", "me", "-p", "game-secret", "-s", ""))
+	require.Len(t, *requests, 1)
+	require.JSONEq(t,
+		`{"name":"game","address":"example.com:4201","login":"me","password":"game-secret","script":""}`,
+		(*requests)[0].body)
+}
+
 func TestDelete(t *testing.T) {
 	requests := newTestServer(t, http.StatusNoContent, "")
 	setStdin(t, "")

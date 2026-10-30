@@ -504,6 +504,26 @@ func TestLoginConnectScript(t *testing.T) {
 	}
 }
 
+func TestLoginEmptyConnectScriptUsesDefault(t *testing.T) {
+	addr, lines := listenUpstream(t)
+	p := newTestPool(t, addr)
+	if _, err := p.db.Exec("UPDATE upstreams SET script=''"); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := login(t, p, loginMsg("game", testIrisPassword)); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case line := <-lines:
+		if want := "connect me " + testUpstreamPassword + "\r\n"; line != want {
+			t.Errorf("upstream received %q, want %q", line, want)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("upstream received nothing")
+	}
+}
+
 func TestLoginErrorMessages(t *testing.T) {
 	p := newTestPool(t, "unused:1")
 	for msg, want := range map[string]string{

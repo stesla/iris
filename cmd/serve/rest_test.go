@@ -243,6 +243,63 @@ func TestAddAndListUpstreams(t *testing.T) {
 	}
 }
 
+func TestAddUpstreamEmptyScriptStoresNull(t *testing.T) {
+	c, srv, _ := newTestAPI(t)
+	empty := ""
+	err := c.AddUpstream(context.Background(), &api.AddUpstreamRequest{
+		Name: "a", Address: "example.org:23", Login: "me", Password: "pw", Script: &empty,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var got sql.NullString
+	srv.db.QueryRow("SELECT script FROM upstreams WHERE name='a'").Scan(&got)
+	if got.Valid {
+		t.Errorf("script should be NULL, got %q", got.String)
+	}
+}
+
+func TestEditUpstreamScript(t *testing.T) {
+	c, srv, _ := newTestAPI(t)
+	ctx := context.Background()
+	addTestUpstream(t, c, "a", "secret")
+
+	stored := func() sql.NullString {
+		t.Helper()
+		var got sql.NullString
+		if err := srv.db.QueryRow("SELECT script FROM upstreams WHERE name='a'").Scan(&got); err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+
+	script := "connect %LOGIN%"
+	if err := c.EditUpstream(ctx, "a", &api.EditUpstreamRequest{Script: &script}); err != nil {
+		t.Fatal(err)
+	}
+	if got := stored(); got.String != script {
+		t.Errorf("script = %v", got)
+	}
+
+	// leaving the script out doesn't change it
+	login := "other"
+	if err := c.EditUpstream(ctx, "a", &api.EditUpstreamRequest{Login: &login}); err != nil {
+		t.Fatal(err)
+	}
+	if got := stored(); got.String != script {
+		t.Errorf("script = %v", got)
+	}
+
+	empty := ""
+	if err := c.EditUpstream(ctx, "a", &api.EditUpstreamRequest{Script: &empty}); err != nil {
+		t.Fatal(err)
+	}
+	if got := stored(); got.Valid {
+		t.Errorf("script should be NULL, got %q", got.String)
+	}
+}
+
 func TestAddUpstreamEncryptsPassword(t *testing.T) {
 	c, srv, _ := newTestAPI(t)
 	addTestUpstream(t, c, "a", "first-secret")

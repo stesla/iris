@@ -87,7 +87,7 @@ request and a Telnet login.
       `writeLoginError` can tell it why. The client just sees the connection
       close. `TestLoginWhileDeletedReportsError` only sees the message
       because it closes the upstream before the client attaches.
-- [ ] **`iris upstream edit` can't clear a field.** `Edit`
+- [x] **`iris upstream edit` can't clear a field.** `Edit`
       (`cmd/upstream/upstream.go`) treats an empty flag as "not given", so
       there's no way to go back to the default connect script.
   - The API can't express it either: `"script": ""` stores an empty script,

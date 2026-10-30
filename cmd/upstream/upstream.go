@@ -94,7 +94,7 @@ func Add(cmd *cobra.Command, args []string) error {
 		Login:    login,
 		Password: password,
 	}
-	if script != "" {
+	if cmd.Flags().Changed("script") {
 		req.Script = &script
 	}
 	// validate before prompting, so nothing is typed for a request that would
@@ -129,19 +129,19 @@ func Delete(cmd *cobra.Command, args []string) error {
 
 func Edit(cmd *cobra.Command, args []string) error {
 	req := &api.EditUpstreamRequest{}
-	if address != "" {
+	if cmd.Flags().Changed("address") {
 		req.Address = &address
 	}
-	if login != "" {
+	if cmd.Flags().Changed("login") {
 		req.Login = &login
 	}
-	if newName != "" {
+	if cmd.Flags().Changed("name") {
 		req.NewName = &newName
 	}
-	if password != "" {
+	if cmd.Flags().Changed("password") {
 		req.Password = &password
 	}
-	if script != "" {
+	if cmd.Flags().Changed("script") {
 		req.Script = &script
 	}
 	// validate before prompting, so nothing is typed for a request that would

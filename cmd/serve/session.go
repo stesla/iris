@@ -329,10 +329,9 @@ func (s *downstream) connectNewUpstream(config *upstreamConfig, options map[stri
 		return fmt.Errorf("error connecting (%v): %w", address, err)
 	}
 
-	var connectScript string
-	if config.script.Valid {
-		connectScript = config.script.String
-	} else {
+	// an empty script means the default, as NULL does
+	connectScript := config.script.String
+	if connectScript == "" {
 		connectScript = "connect %LOGIN% %PASSWORD%"
 	}
 

@@ -214,7 +214,7 @@ With `-p -`, the upstream password is prompted for twice. If standard input isn'
 
 Upstream names can be up to 64 letters, digits, `.`, `_`, and `-`, and must start with a letter or digit. Names are used in history log file names.
 
-The connect script is sent to the upstream when Iris connects to it. `%LOGIN%` and `%PASSWORD%` are replaced with the upstream's login and its stored password. If no script is set, Iris sends `connect %LOGIN% %PASSWORD%`.
+The connect script is sent to the upstream when Iris connects to it. `%LOGIN%` and `%PASSWORD%` are replaced with the upstream's login and its stored password. If no script is set, Iris sends `connect %LOGIN% %PASSWORD%`. To go back to that default, clear the script with `iris upstream edit NAME -s ""`. The script is the only setting that can be cleared: giving any other flag an empty value is an error.
 
 Arguments and flags are checked before any password is prompted for. The client exits with status 1 if a request fails.
 
@@ -272,7 +272,7 @@ Lists all configured upstreams, sorted by name. Passwords and connect scripts ar
 
 ### `POST /upstreams`
 
-Adds an upstream. `name`, `address`, `login`, and `password` are required; `script` is optional. `password` is the upstream account's password, which is stored encrypted. `name` must follow the [naming rules](#command-line-client).
+Adds an upstream. `name`, `address`, `login`, and `password` are required; `script` is optional, and leaving it out or empty means the default. `password` is the upstream account's password, which is stored encrypted. `name` must follow the [naming rules](#command-line-client).
 
 ```json
 {
@@ -288,7 +288,7 @@ Adding an upstream does not connect to it; Iris connects the first time a client
 
 ### `PATCH /upstreams/{name}`
 
-Edits an upstream. All fields are optional, and only the fields present are changed. An empty object (`{}`) changes nothing.
+Edits an upstream. All fields are optional, and only the fields present are changed. An empty object (`{}`) changes nothing. An empty `script` clears the script, so Iris goes back to sending the default; the other fields can't be empty.
 
 ```json
 {
