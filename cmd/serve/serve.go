@@ -32,13 +32,7 @@ func AddToCommand(cmd *cobra.Command) {
 }
 
 func Serve(cmd *cobra.Command, args []string) {
-	if l, err := zerolog.ParseLevel(viper.GetString("log.level")); err != nil {
-		cobra.CheckErr(err)
-	} else {
-		// TODO: this discards the result, so log.level has no effect. It
-		// should be logger = logger.Level(l).
-		logger.Level(l)
-	}
+	cobra.CheckErr(setLogLevel(viper.GetString("log.level")))
 
 	db, box, err := prepare(context.Background())
 	cobra.CheckErr(err)
@@ -47,6 +41,21 @@ func Serve(cmd *cobra.Command, args []string) {
 
 	go runApiServer(db, sessions, box)
 	runTelnetProxy(sessions)
+}
+
+// setLogLevel sets the level of logger, so call it before anything copies
+// logger.
+func setLogLevel(level string) error {
+	l, err := zerolog.ParseLevel(level)
+	if err != nil {
+		return err
+	}
+	// ParseLevel accepts an empty string as NoLevel, which drops every line
+	if l == zerolog.NoLevel {
+		return fmt.Errorf("invalid log level %q", level)
+	}
+	logger = logger.Level(l)
+	return nil
 }
 
 // prepare opens the database and loads the encryption key. It refuses to

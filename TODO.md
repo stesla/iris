@@ -52,7 +52,7 @@ request and a Telnet login.
 
 ## Bugs
 
-- [ ] **`log.level` has no effect.** `Serve` (`cmd/serve/serve.go`) calls
+- [x] **`log.level` has no effect.** `Serve` (`cmd/serve/serve.go`) calls
       `logger.Level(l)` and discards the result; it should be
       `logger = logger.Level(l)`. Marked with a TODO in the code. Fixing it
       changes what reaches the logs, so check the configured level first.

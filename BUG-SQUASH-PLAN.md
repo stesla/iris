@@ -50,7 +50,7 @@ Phase 1: Crash
 - [x] 1. `fix panic on short telnet subnegotiation` (not in TODO)
 
 Phase 2: Standalone bugs
-- [ ] 2. `make log.level take effect`
+- [x] 2. `make log.level take effect`
 - [ ] 3. `exit cleanly on shutdown`
 - [ ] 4. `honor IRIS_CONFIG`
 - [ ] 5. `register upstream flags per subcommand`

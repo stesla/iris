@@ -1,6 +1,7 @@
 package serve
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"os"
@@ -8,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/rs/zerolog"
 	"github.com/spf13/viper"
 
 	"github.com/stesla/iris/internal/database/dbtest"
@@ -39,6 +41,59 @@ func usePrepareSettings(t *testing.T, path string) string {
 		viper.Set("secret.key_file", "")
 	})
 	return keyFile
+}
+
+// captureLogger points logger at the returned buffer until the test ends.
+func captureLogger(t *testing.T) *bytes.Buffer {
+	t.Helper()
+	saved := logger
+	t.Cleanup(func() { logger = saved })
+	var buf bytes.Buffer
+	logger = zerolog.New(&buf)
+	return &buf
+}
+
+func TestSetLogLevel(t *testing.T) {
+	buf := captureLogger(t)
+	if err := setLogLevel("warn"); err != nil {
+		t.Fatal(err)
+	}
+
+	logger.Info().Msg("dropped")
+	logger.Warn().Msg("kept")
+
+	if got := buf.String(); strings.Contains(got, "dropped") || !strings.Contains(got, "kept") {
+		t.Errorf("got %q", got)
+	}
+}
+
+func TestSetLogLevelInvalid(t *testing.T) {
+	for _, level := range []string{"bogus", ""} {
+		buf := captureLogger(t)
+		if err := setLogLevel(level); err == nil {
+			t.Errorf("level %q: no error", level)
+		}
+
+		logger.Info().Msg("kept")
+		if got := buf.String(); !strings.Contains(got, "kept") {
+			t.Errorf("level %q: got %q", level, got)
+		}
+	}
+}
+
+func TestSessionPoolInheritsLogLevel(t *testing.T) {
+	buf := captureLogger(t)
+	if err := setLogLevel("warn"); err != nil {
+		t.Fatal(err)
+	}
+
+	p := NewSessionPool(nil, nil, logger)
+	p.logger.Info().Msg("dropped")
+	p.logger.Warn().Msg("kept")
+
+	if got := buf.String(); strings.Contains(got, "dropped") || !strings.Contains(got, "kept") {
+		t.Errorf("got %q", got)
+	}
 }
 
 func TestPrepare(t *testing.T) {
