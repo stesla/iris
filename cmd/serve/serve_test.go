@@ -4,10 +4,13 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"errors"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/rs/zerolog"
 	"github.com/spf13/viper"
@@ -93,6 +96,66 @@ func TestSessionPoolInheritsLogLevel(t *testing.T) {
 
 	if got := buf.String(); strings.Contains(got, "dropped") || !strings.Contains(got, "kept") {
 		t.Errorf("got %q", got)
+	}
+}
+
+func TestAcceptConnsDeliversConnections(t *testing.T) {
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+
+	conns := make(chan net.Conn)
+	go acceptConns(l, conns)
+
+	client, err := net.Dial("tcp", l.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+
+	select {
+	case conn := <-conns:
+		conn.Close()
+	case <-time.After(5 * time.Second):
+		t.Fatal("connection wasn't delivered")
+	}
+}
+
+func TestAcceptConnsListenerClosed(t *testing.T) {
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result := make(chan error, 1)
+	go func() { result <- acceptConns(l, make(chan net.Conn)) }()
+	l.Close()
+
+	select {
+	case err := <-result:
+		if err != nil {
+			t.Errorf("got %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("acceptConns didn't return")
+	}
+}
+
+// failingListener is a net.Listener whose Accept always fails with err.
+type failingListener struct {
+	net.Listener
+	err error
+}
+
+func (l failingListener) Accept() (net.Conn, error) { return nil, l.err }
+
+func TestAcceptConnsOtherError(t *testing.T) {
+	boom := errors.New("boom")
+	err := acceptConns(failingListener{err: boom}, make(chan net.Conn))
+	if !errors.Is(err, boom) {
+		t.Errorf("got %v", err)
 	}
 }
 

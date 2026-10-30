@@ -114,11 +114,11 @@ func runTelnetProxy(sessions *SessionPool) {
 	chExitSignal := make(chan os.Signal, 1)
 	signal.Notify(chExitSignal, os.Interrupt, syscall.SIGTERM)
 	go func() {
-		for sig := range chExitSignal {
-			logger.Info().Str("signal", sig.String()).Msg("exiting")
-			sessions.CloseAll()
-			close(chExit)
-		}
+		// only the first signal matters, and a repeat must not close chExit twice
+		sig := <-chExitSignal
+		logger.Info().Str("signal", sig.String()).Msg("exiting")
+		sessions.CloseAll()
+		close(chExit)
 	}()
 
 	l, err := net.Listen("tcp", viper.GetString("addr"))
@@ -129,12 +129,8 @@ func runTelnetProxy(sessions *SessionPool) {
 
 	chAccept := make(chan net.Conn)
 	go func() {
-		for {
-			if tcp, err := l.Accept(); err != nil {
-				logger.Fatal().Err(err).Send()
-			} else {
-				chAccept <- tcp
-			}
+		if err := acceptConns(l, chAccept); err != nil {
+			logger.Fatal().Err(err).Send()
 		}
 	}()
 
@@ -152,5 +148,19 @@ loop:
 				session.runForever()
 			}()
 		}
+	}
+}
+
+// acceptConns sends each connection l accepts to conns until l fails. It
+// returns nil if that's because l was closed, which is how shutdown stops it.
+func acceptConns(l net.Listener, conns chan<- net.Conn) error {
+	for {
+		tcp, err := l.Accept()
+		if errors.Is(err, net.ErrClosed) {
+			return nil
+		} else if err != nil {
+			return err
+		}
+		conns <- tcp
 	}
 }

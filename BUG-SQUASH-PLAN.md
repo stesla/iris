@@ -51,7 +51,7 @@ Phase 1: Crash
 
 Phase 2: Standalone bugs
 - [x] 2. `make log.level take effect`
-- [ ] 3. `exit cleanly on shutdown`
+- [x] 3. `exit cleanly on shutdown`
 - [ ] 4. `honor IRIS_CONFIG`
 - [ ] 5. `register upstream flags per subcommand`
 - [ ] 6. `allow clearing an upstream's connect script`
@@ -99,7 +99,7 @@ All of these were reproduced at `4a85735` unless marked otherwise.
 | Replay is corrupted even after charset is accepted. | Put `caf\xc3\xa9` in the history, have a joining client answer `DO CHARSET` and `CHARSET ACCEPTED UTF-8` but not Transmit Binary. It receives `caf\x1a`. | 15 |
 | A client that answers charset before logging in gets no history. | Send `IAC DONT CHARSET IAC WONT CHARSET` followed by the login in one write. The listener isn't registered until `cmd/serve/session.go:398`, so it misses the event. | 15 |
 | Replay of a new log includes the `opened` separator. | `cmd/serve/session.go:794` tests `n > 0`, and in a new log the separator is at offset 0. | 15 |
-| A second SIGTERM panics. | Found by reading, not reproduced: the loop at `cmd/serve/serve.go:108` repeats the `close` at `:111`. | 3 |
+| A second SIGTERM panics. | The loop at `cmd/serve/serve.go:108` repeats the `close` at `:111`. Reproduced at `32fb3a9`: two quick SIGTERMs panicked in 1 run of 20. | 3 |
 
 ## Where this plan differs from TODO.md's suggestions
 

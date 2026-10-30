@@ -56,7 +56,7 @@ request and a Telnet login.
       `logger.Level(l)` and discards the result; it should be
       `logger = logger.Level(l)`. Marked with a TODO in the code. Fixing it
       changes what reaches the logs, so check the configured level first.
-- [ ] **Shutdown exits with status 1.** After SIGTERM, `runTelnetProxy`
+- [x] **Shutdown exits with status 1.** After SIGTERM, `runTelnetProxy`
       closes the listener, and the accept goroutine then calls
       `logger.Fatal` on `use of closed network connection`. A service
       manager such as systemd then marks the service as failed after an
