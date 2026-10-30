@@ -61,7 +61,7 @@ request and a Telnet login.
       `logger.Fatal` on `use of closed network connection`. A service
       manager such as systemd then marks the service as failed after an
       ordinary stop. Treat `net.ErrClosed` as a normal exit.
-- [ ] **`IRIS_CONFIG` is ignored.** `initConfig` (`cmd/root.go`) calls
+- [x] **`IRIS_CONFIG` is ignored.** `initConfig` (`cmd/root.go`) calls
       `viper.GetString("config")` before `viper.AutomaticEnv()`, and nothing
       else binds the key, so the variable is never read.
   - Setting `IRIS_CONFIG` only appears to work when the search path happens

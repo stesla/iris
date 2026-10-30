@@ -133,6 +133,8 @@ Options are ignored when joining an upstream that is already connected, or that 
 
 Iris reads `config.yaml` (or any format supported by [Viper](https://github.com/spf13/viper), e.g. `config.json` or `config.toml`) from the current directory or `$HOME/.config/iris/`. A configuration file is required, even if it only sets defaults.
 
+Set `IRIS_CONFIG` to the path of a configuration file to use that file instead, for both the server and the command line tools. It takes priority over a `config.yaml` in the current directory, and Iris exits with an error if the file doesn't exist rather than falling back to those locations.
+
 Every setting can also be overridden with an environment variable: prefix the key with `IRIS_`, uppercase it, and replace `.` with `_`.
 
 | Key | Environment Variable | Default | Description |

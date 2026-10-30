@@ -52,7 +52,7 @@ Phase 1: Crash
 Phase 2: Standalone bugs
 - [x] 2. `make log.level take effect`
 - [x] 3. `exit cleanly on shutdown`
-- [ ] 4. `honor IRIS_CONFIG`
+- [x] 4. `honor IRIS_CONFIG`
 - [ ] 5. `register upstream flags per subcommand`
 - [ ] 6. `allow clearing an upstream's connect script`
 
