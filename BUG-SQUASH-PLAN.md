@@ -53,7 +53,7 @@ Phase 2: Standalone bugs
 - [x] 2. `make log.level take effect`
 - [x] 3. `exit cleanly on shutdown`
 - [x] 4. `honor IRIS_CONFIG`
-- [ ] 5. `register upstream flags per subcommand`
+- [x] 5. `register upstream flags per subcommand`
 - [ ] 6. `allow clearing an upstream's connect script`
 
 Phase 3: Log file
@@ -199,8 +199,9 @@ afterwards)
   none.
 - Build the tree in a `newCommand()` function so every run starts clean.
 
-**Behaviour change:** `iris upstream -a x edit game`, with the flag before the
-subcommand, stops working.
+**Not a behaviour change:** `iris upstream -a x edit game`, with the flag before
+the subcommand, still works, because Cobra hands the flag to the subcommand.
+`iris upstream -a x delete game` is rejected like any other wrong flag.
 
 **Tests**
 - Change `run` at `cmd/upstream/upstream_test.go:72` to use a fresh tree, and

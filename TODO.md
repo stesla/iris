@@ -96,7 +96,7 @@ request and a Telnet login.
   - `cmd.Flags().Changed("script")` would tell "not given" from "given as
     empty", and would let the tests stop resetting the package-level flag
     variables between runs.
-- [ ] **Every `iris upstream` flag is accepted by every subcommand.** The
+- [x] **Every `iris upstream` flag is accepted by every subcommand.** The
       flags are persistent flags on `iris upstream` (`cmd/upstream/upstream.go`),
       so for example `delete` accepts `-a` and ignores it. Register each
       flag only on the subcommands that use it, so a wrong flag is an

@@ -16,14 +16,6 @@ import (
 )
 
 var (
-	pkgcmd = &cobra.Command{
-		Use:   "upstream [OPTIONS] COMMAND",
-		Short: "commands for managing upstreams",
-		PersistentPreRun: func(cmd *cobra.Command, args []string) {
-			// args have been validated by now, so any error is from the server
-			cmd.SilenceUsage = true
-		},
-	}
 	address  string
 	login    string
 	newName  string
@@ -31,42 +23,65 @@ var (
 	script   string
 )
 
-func init() {
-	pkgcmd.PersistentFlags().StringVarP(&address, "address", "a", "", "address for upstream session")
-	pkgcmd.PersistentFlags().StringVarP(&login, "login", "l", "", "login for upstream session")
-	pkgcmd.PersistentFlags().StringVarP(&newName, "name", "n", "", "name for upstream session")
-	pkgcmd.PersistentFlags().StringVarP(&password, "password", "p", "", "password for upstream session, or - to prompt for it")
-	pkgcmd.PersistentFlags().StringVarP(&script, "script", "s", "", "connect script")
-	pkgcmd.AddCommand(&cobra.Command{
+// newCommand builds the `iris upstream` command tree. Registering a flag sets
+// its variable to the default, so each tree starts with the flags unset.
+func newCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "upstream COMMAND",
+		Short: "commands for managing upstreams",
+		PersistentPreRun: func(cmd *cobra.Command, args []string) {
+			// args have been validated by now, so any error is from the server
+			cmd.SilenceUsage = true
+		},
+	}
+
+	add := &cobra.Command{
 		Use:   "add NAME -a ADDRESS -l LOGIN -p PASSWORD",
 		Short: "add a new upstream",
 		Long:  "Add a new upstream. The password (-p) is the password for the upstream account, which Iris sends in the connect script, and is required. With -p -, it is prompted for, or read from the first line of standard input if that is not a terminal, so it stays out of shell history.",
 		Args:  cobra.ExactArgs(1),
 		RunE:  Add,
-	})
-	pkgcmd.AddCommand(&cobra.Command{
+	}
+	addSettingFlags(add)
+	cmd.AddCommand(add)
+
+	cmd.AddCommand(&cobra.Command{
 		Use:   "delete NAME",
 		Short: "delete an upstream",
 		Args:  cobra.ExactArgs(1),
 		RunE:  Delete,
 	})
-	pkgcmd.AddCommand(&cobra.Command{
+
+	edit := &cobra.Command{
 		Use:   "edit NAME",
 		Short: "edit an existing upstream",
 		Long:  "Edit an existing upstream, changing only the settings given. With -p -, the new password is prompted for, or read from the first line of standard input if that is not a terminal, so it stays out of shell history.",
 		Args:  cobra.ExactArgs(1),
 		RunE:  Edit,
-	})
-	pkgcmd.AddCommand(&cobra.Command{
+	}
+	addSettingFlags(edit)
+	edit.Flags().StringVarP(&newName, "name", "n", "", "new name for upstream session")
+	cmd.AddCommand(edit)
+
+	cmd.AddCommand(&cobra.Command{
 		Use:   "list",
 		Short: "list all upstreams",
 		Args:  cobra.NoArgs,
 		RunE:  List,
 	})
+	return cmd
+}
+
+// addSettingFlags registers the flags that add and edit share.
+func addSettingFlags(cmd *cobra.Command) {
+	cmd.Flags().StringVarP(&address, "address", "a", "", "address for upstream session")
+	cmd.Flags().StringVarP(&login, "login", "l", "", "login for upstream session")
+	cmd.Flags().StringVarP(&password, "password", "p", "", "password for upstream session, or - to prompt for it")
+	cmd.Flags().StringVarP(&script, "script", "s", "", "connect script")
 }
 
 func AddToCommand(cmd *cobra.Command) {
-	cmd.AddCommand(pkgcmd)
+	cmd.AddCommand(newCommand())
 }
 
 func Add(cmd *cobra.Command, args []string) error {

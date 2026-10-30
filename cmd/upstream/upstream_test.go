@@ -67,15 +67,15 @@ func requireUnread(t *testing.T, stdin *os.File, want string) {
 	require.Equal(t, want, string(got))
 }
 
-// run runs `iris upstream` with args, resetting the flags first since they
-// are package variables that persist between runs.
+// run runs `iris upstream` with args, on a fresh command tree so that no flag
+// state carries over between runs.
 func run(t *testing.T, args ...string) error {
 	t.Helper()
-	address, login, newName, password, script = "", "", "", "", ""
-	pkgcmd.SetArgs(args)
-	pkgcmd.SetOut(io.Discard)
-	pkgcmd.SetErr(io.Discard)
-	return pkgcmd.Execute()
+	cmd := newCommand()
+	cmd.SetArgs(args)
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	return cmd.Execute()
 }
 
 func TestAddWithPassword(t *testing.T) {
@@ -203,6 +203,30 @@ func TestOldPasswordArgumentsRejected(t *testing.T) {
 	require.Error(t, run(t, "delete", "game", "game-secret"))
 	require.Error(t, run(t, "edit", "game", "game-secret"))
 	require.Empty(t, *requests)
+}
+
+func TestFlagsRejected(t *testing.T) {
+	for _, args := range [][]string{
+		{"delete", "game", "-a", "x"},
+		{"delete", "game", "-l", "x"},
+		{"delete", "game", "-n", "x"},
+		{"delete", "game", "-p", "x"},
+		{"delete", "game", "-s", "x"},
+		{"list", "-a", "x"},
+		{"list", "-l", "me"},
+		{"list", "-n", "x"},
+		{"list", "-p", "x"},
+		{"list", "-s", "x"},
+		{"add", "game", "-n", "x", "-a", "example.com:4201", "-l", "me", "-p", "game-secret"},
+		// cobra hands a flag before the subcommand to the subcommand
+		{"-a", "x", "delete", "game"},
+	} {
+		requests := newTestServer(t, http.StatusNoContent, "")
+		setStdin(t, "")
+
+		require.Error(t, run(t, args...), "%v", args)
+		require.Empty(t, *requests, "%v", args)
+	}
 }
 
 func TestList(t *testing.T) {
