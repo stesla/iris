@@ -43,7 +43,7 @@ func newTestServer(t *testing.T, status int, body string) *[]request {
 
 // setStdin replaces standard input with a pipe holding input, which is never
 // a terminal.
-func setStdin(t *testing.T, input string) {
+func setStdin(t *testing.T, input string) *os.File {
 	t.Helper()
 	r, w, err := os.Pipe()
 	require.NoError(t, err)
@@ -56,6 +56,15 @@ func setStdin(t *testing.T, input string) {
 		os.Stdin = old
 		r.Close()
 	})
+	return r
+}
+
+// requireUnread checks that nothing has been read from stdin yet.
+func requireUnread(t *testing.T, stdin *os.File, want string) {
+	t.Helper()
+	got, err := io.ReadAll(stdin)
+	require.NoError(t, err)
+	require.Equal(t, want, string(got))
 }
 
 // run runs `iris upstream` with args, resetting the flags first since they
@@ -73,7 +82,7 @@ func TestAddWithPassword(t *testing.T) {
 	requests := newTestServer(t, http.StatusCreated, "")
 	setStdin(t, "")
 
-	require.NoError(t, run(t, "add", "shang.beth", "game-secret", "-a", "example.com:4201", "-l", "beth"))
+	require.NoError(t, run(t, "add", "shang.beth", "-p", "game-secret", "-a", "example.com:4201", "-l", "beth"))
 	require.Len(t, *requests, 1)
 	r := (*requests)[0]
 	require.Equal(t, "POST", r.method)
@@ -87,7 +96,7 @@ func TestAddPasswordFromStdin(t *testing.T) {
 	requests := newTestServer(t, http.StatusCreated, "")
 	setStdin(t, "piped-secret\n")
 
-	require.NoError(t, run(t, "add", "game", "-a", "example.com:4201", "-l", "me", "-s", "connect %LOGIN%"))
+	require.NoError(t, run(t, "add", "game", "-p", "-", "-a", "example.com:4201", "-l", "me", "-s", "connect %LOGIN%"))
 	require.Len(t, *requests, 1)
 	require.JSONEq(t,
 		`{"name":"game","address":"example.com:4201","login":"me","password":"piped-secret","script":"connect %LOGIN%"}`,
@@ -98,8 +107,40 @@ func TestAddEmptyPassword(t *testing.T) {
 	requests := newTestServer(t, http.StatusCreated, "")
 	setStdin(t, "\n")
 
-	require.ErrorContains(t, run(t, "add", "game", "-a", "example.com:4201", "-l", "me"), "upstream password cannot be empty")
+	require.ErrorContains(t, run(t, "add", "game", "-p", "-", "-a", "example.com:4201", "-l", "me"), "upstream password cannot be empty")
 	require.Empty(t, *requests)
+}
+
+func TestAddRequiresPassword(t *testing.T) {
+	requests := newTestServer(t, http.StatusCreated, "")
+	stdin := setStdin(t, "piped-secret\n")
+
+	require.ErrorContains(t, run(t, "add", "game", "-a", "example.com:4201", "-l", "me"), "password is required")
+	require.Error(t, run(t, "add", "game", "game-secret", "-a", "example.com:4201", "-l", "me"))
+	require.Empty(t, *requests)
+	requireUnread(t, stdin, "piped-secret\n")
+}
+
+// TestValidateBeforePrompt checks that a request that would fail is rejected
+// before the Iris or upstream password is asked for.
+func TestValidateBeforePrompt(t *testing.T) {
+	for _, args := range [][]string{
+		{"add", "game", "-p", "-", "-l", "me"},
+		{"add", "game", "-p", "-", "-a", "example.com:4201"},
+		{"add", "bad/name", "-p", "-", "-a", "example.com:4201", "-l", "me"},
+		{"edit", "game", "-p", "-", "-n", ".hidden"},
+	} {
+		requests := newTestServer(t, http.StatusNoContent, "")
+		// with no Iris password set, newClient would fail with a different error
+		viper.Set("api.client.password", "")
+		stdin := setStdin(t, "piped-secret\n")
+
+		err := run(t, args...)
+		require.Error(t, err, "%v", args)
+		require.NotContains(t, err.Error(), "api.client.password", "%v", args)
+		require.Empty(t, *requests, "%v", args)
+		requireUnread(t, stdin, "piped-secret\n")
+	}
 }
 
 func TestEdit(t *testing.T) {
@@ -198,8 +239,8 @@ func TestNoIrisPassword(t *testing.T) {
 }
 
 func TestServerError(t *testing.T) {
-	newTestServer(t, http.StatusUnauthorized, `{"error":"incorrect password"}`)
+	newTestServer(t, http.StatusUnauthorized, `{"error":"incorrect Iris password"}`)
 	setStdin(t, "")
 
-	require.EqualError(t, run(t, "list"), "incorrect password")
+	require.EqualError(t, run(t, "list"), "incorrect Iris password")
 }

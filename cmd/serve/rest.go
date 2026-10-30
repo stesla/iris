@@ -284,12 +284,10 @@ func writeError(w http.ResponseWriter, r *http.Request, err error) {
 	case errors.Is(err, sql.ErrNoRows):
 		status, msg = http.StatusNotFound, "upstream not found"
 	case errors.Is(err, bcrypt.ErrMismatchedHashAndPassword):
-		status, msg = http.StatusUnauthorized, "incorrect password"
+		status, msg = http.StatusUnauthorized, "incorrect Iris password"
 	case errors.Is(err, auth.ErrPasswordNotSet):
 		status, msg = http.StatusServiceUnavailable, err.Error()
-	case errors.As(err, &sqliteErr) &&
-		(sqliteErr.ExtendedCode == sqlite3.ErrConstraintPrimaryKey ||
-			sqliteErr.ExtendedCode == sqlite3.ErrConstraintUnique):
+	case errors.As(err, &sqliteErr) && sqliteErr.ExtendedCode == sqlite3.ErrConstraintUnique:
 		status, msg = http.StatusConflict, "upstream already exists"
 	default:
 		logger.Error().Err(err).Str("method", r.Method).Str("path", r.URL.Path).Msg("api error")

@@ -36,6 +36,13 @@ const maxLoginBytes = 64 << 10
 // so tests can shorten it.
 var loginTimeout = 30 * time.Second
 
+// dial connects to games. It is a variable so tests can control it.
+var dial = (&net.Dialer{}).DialContext
+
+// dialTimeout limits how long connecting to a game can take. It is a
+// variable so tests can shorten it.
+var dialTimeout = 30 * time.Second
+
 // loginErrorTimeout limits how long Iris waits to tell a client why its login
 // failed, in case the client isn't reading.
 const loginErrorTimeout = 5 * time.Second
@@ -44,6 +51,7 @@ var (
 	errLoginTooLong           = errors.New("login too long")
 	errUpstreamPasswordNotSet = errors.New("upstream password not set")
 	errUpstreamClosed         = errors.New("upstream was closed while connecting")
+	errUpstreamNotConnected   = errors.New("upstream failed to connect")
 )
 
 type SessionPool struct {
@@ -248,7 +256,12 @@ type downstream struct {
 	pool *SessionPool
 	*telnetSession
 	upstream *upstream
+}
 
+// loginRequest is the JSON a client sends to log in. It is decoded into its
+// own type, rather than into downstream, so a client can only set these
+// fields.
+type loginRequest struct {
 	Name     string            `json:"name"`
 	Password string            `json:"password"`
 	Options  map[string]string `json:"options"`
@@ -296,8 +309,8 @@ func (c *upstreamConfig) openPassword(box *secret.Box) (string, error) {
 	return string(password), nil
 }
 
-func (s *downstream) connectNewUpstream(config *upstreamConfig) error {
-	for option, value := range s.Options {
+func (s *downstream) connectNewUpstream(config *upstreamConfig, options map[string]string) error {
+	for option, value := range options {
 		if err := s.upstream.setOption(option, value); err != nil {
 			return err
 		}
@@ -333,8 +346,17 @@ func (s *downstream) connectNewUpstream(config *upstreamConfig) error {
 }
 
 func (s *downstream) connectUpstream() (err error) {
+	authenticated := false
+	var connecting *upstream // set if this login is the one connecting
+
 	// deferred functions run last first, so the client is told why its
-	// login failed before removing the upstream closes the client
+	// login failed before removing the upstream closes the client, and
+	// logins waiting on this one are only woken once that is done
+	defer func() {
+		if connecting != nil {
+			connecting.endConnect()
+		}
+	}()
 	defer func() {
 		if err != nil && s.upstream != nil {
 			s.pool.removeUnconnected(s.upstream)
@@ -342,56 +364,72 @@ func (s *downstream) connectUpstream() (err error) {
 	}()
 	defer func() {
 		if err != nil {
-			s.writeLoginError(err)
+			s.writeLoginError(err, authenticated)
 		}
 	}()
 
-	if err := s.readLogin(); err != nil {
-		return err
-	}
-
-	err = auth.CheckPassword(s.Context(), s.pool.db, s.Password)
-	s.Password = ""
+	login, err := s.readLogin()
 	if err != nil {
 		return err
 	}
 
-	config, err := loadUpstream(s.Context(), s.pool.db, s.Name)
+	if err := auth.CheckPassword(s.Context(), s.pool.db, login.Password); err != nil {
+		return err
+	}
+	authenticated = true
+
+	config, err := loadUpstream(s.Context(), s.pool.db, login.Name)
 	if err != nil {
 		return err
 	}
 
-	s.upstream = s.pool.upstreamFor(config.id, s.Name)
-	s.upstream.AddDownstream(s)
-	if s.upstream.IsConnected() {
+	u := s.pool.upstreamFor(config.id, login.Name)
+	first, done := u.beginConnect()
+	if !first {
+		// another login connected this upstream, or is connecting it. The
+		// client is only attached once that has succeeded, so a failure
+		// doesn't close it before it is told why.
+		<-done
+		if !u.IsConnected() {
+			return errUpstreamNotConnected
+		}
+		s.upstream = u
+		u.AddDownstream(s)
 		s.dispatcher.Listen(EventCharsetResolved, s)
 		return nil
 	}
 
-	return s.connectNewUpstream(config)
+	connecting = u
+	s.upstream = u
+	u.AddDownstream(s)
+	return s.connectNewUpstream(config, login.Options)
 }
 
 // readLogin reads the client's JSON login, which must arrive within
 // loginTimeout and maxLoginBytes.
-func (s *downstream) readLogin() error {
+func (s *downstream) readLogin() (*loginRequest, error) {
 	if err := s.conn.SetReadDeadline(time.Now().Add(loginTimeout)); err != nil {
-		return err
+		return nil, err
 	}
+	var login loginRequest
 	decoder := json.NewDecoder(&limitReader{r: s, n: maxLoginBytes})
-	if err := decoder.Decode(s); err != nil {
-		return err
+	if err := decoder.Decode(&login); err != nil {
+		return nil, err
 	}
-	return s.conn.SetReadDeadline(time.Time{})
+	return &login, s.conn.SetReadDeadline(time.Time{})
 }
 
 // writeLoginError tells the client why its login failed. The line ends in
 // "\n" alone, which the Telnet writer sends as CR LF.
-func (s *downstream) writeLoginError(err error) {
+func (s *downstream) writeLoginError(err error, authenticated bool) {
 	s.conn.SetWriteDeadline(time.Now().Add(loginErrorTimeout))
-	fmt.Fprintf(s, "login failed: %s\n", loginErrorMessage(err))
+	fmt.Fprintf(s, "login failed: %s\n", loginErrorMessage(err, authenticated))
 }
 
-func loginErrorMessage(err error) string {
+// loginErrorMessage describes err to the client. Errors it doesn't recognize
+// are only described to a client that has given the Iris password; anyone
+// else gets "internal error", so the details stay in the server log.
+func loginErrorMessage(err error, authenticated bool) string {
 	var syntaxErr *json.SyntaxError
 	var typeErr *json.UnmarshalTypeError
 	switch {
@@ -402,13 +440,15 @@ func loginErrorMessage(err error) string {
 	case errors.As(err, &syntaxErr), errors.As(err, &typeErr):
 		return "invalid login: " + err.Error()
 	case errors.Is(err, bcrypt.ErrMismatchedHashAndPassword):
-		return "incorrect password"
+		return "incorrect Iris password"
 	case errors.Is(err, sql.ErrNoRows):
 		return "upstream not found"
 	case errors.Is(err, secret.ErrDecrypt), errors.Is(err, secret.ErrUnsupportedVersion):
 		return "unable to decrypt upstream password"
 	case errors.Is(err, errUpstreamClosed):
 		return errUpstreamClosed.Error()
+	case !authenticated:
+		return "internal error"
 	default:
 		return err.Error()
 	}
@@ -452,16 +492,19 @@ type upstream struct {
 	*telnetSession
 	id int64
 
-	mux        sync.Mutex // guards downstream
+	// mux guards downstream. It is only held to read or change the list,
+	// never while writing to a client, so a client that isn't reading can't
+	// keep the upstream from closing.
+	mux        sync.Mutex
 	downstream []io.WriteCloser
 
-	// state guards the fields below, and setting telnetSession. It is
-	// separate from mux, which is held while writing to clients, so a client
-	// that isn't reading can't keep the upstream from closing.
-	state   sync.Mutex
-	name    string
-	closed  bool
-	history History
+	// state guards the fields below, and setting telnetSession.
+	state      sync.Mutex
+	name       string
+	closed     bool
+	history    History
+	connecting chan struct{}      // closed once the first login has connected, or failed to
+	cancelDial context.CancelFunc // set while dialing, so Close can cancel it
 
 	dispatcher event.Dispatcher
 	logger     zerolog.Logger
@@ -469,14 +512,53 @@ type upstream struct {
 
 const EventConnectUpstream event.Name = "upstream.connect"
 
+// beginConnect reports whether the caller is the first login to this
+// upstream, and so must connect it and then call endConnect. Every later
+// login gets a channel that is closed once the first login is done,
+// whether or not it connected.
+func (s *upstream) beginConnect() (first bool, done <-chan struct{}) {
+	s.state.Lock()
+	defer s.state.Unlock()
+	if s.connecting != nil {
+		return false, s.connecting
+	}
+	s.connecting = make(chan struct{})
+	return true, s.connecting
+}
+
+// endConnect wakes the logins waiting for the first one.
+func (s *upstream) endConnect() {
+	s.state.Lock()
+	defer s.state.Unlock()
+	close(s.connecting)
+}
+
 // Connect connects to the game at addr. It fails with errUpstreamClosed if
-// the upstream is closed first, such as by being deleted while connecting.
+// the upstream is closed first, such as by being deleted while connecting,
+// which also cancels the dial.
 func (s *upstream) Connect(addr string) error {
 	s.state.Lock()
+	if s.closed {
+		s.state.Unlock()
+		return errUpstreamClosed
+	}
 	name := s.name
+	ctx, cancel := context.WithTimeout(context.Background(), dialTimeout)
+	defer cancel()
+	s.cancelDial = cancel
 	s.state.Unlock()
 
-	tcp, err := net.Dial("tcp", addr)
+	tcp, err := dial(ctx, "tcp", addr)
+	s.state.Lock()
+	s.cancelDial = nil
+	closed := s.closed
+	s.state.Unlock()
+	if closed {
+		if tcp != nil {
+			tcp.Close()
+		}
+		return errUpstreamClosed
+	}
 	if err != nil {
 		return err
 	}
@@ -514,13 +596,23 @@ func (s *upstream) AddDownstream(w io.WriteCloser) {
 	s.downstream = append(s.downstream, w)
 }
 
+// clients returns a copy of the client list.
+func (s *upstream) clients() []io.WriteCloser {
+	s.mux.Lock()
+	defer s.mux.Unlock()
+	return slices.Clone(s.downstream)
+}
+
 func (s *upstream) Close() error {
 	s.state.Lock()
 	s.closed = true
 	session := s.telnetSession
+	if s.cancelDial != nil {
+		s.cancelDial()
+	}
 	s.state.Unlock()
 
-	for _, wc := range s.downstream {
+	for _, wc := range s.clients() {
 		wc.Close()
 	}
 	if session != nil {
@@ -564,12 +656,23 @@ func (s *upstream) runForever() {
 	s.logger.Debug().Msg("disconnected")
 }
 
+// sendDownstream writes buf to every client, and drops the ones that fail.
+// It writes without holding mux, so a client added meanwhile starts with the
+// next buf.
 func (s *upstream) sendDownstream(buf []byte) {
+	var failed []io.WriteCloser
+	for _, wc := range s.clients() {
+		if _, err := wc.Write(buf); err != nil {
+			failed = append(failed, wc)
+		}
+	}
+	if len(failed) == 0 {
+		return
+	}
 	s.mux.Lock()
 	defer s.mux.Unlock()
 	s.downstream = slices.DeleteFunc(s.downstream, func(wc io.WriteCloser) bool {
-		_, err := wc.Write(buf)
-		return err != nil
+		return slices.Contains(failed, wc)
 	})
 }
 

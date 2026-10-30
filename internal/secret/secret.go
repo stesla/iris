@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path/filepath"
 	"runtime"
 
 	"golang.org/x/crypto/chacha20poly1305"
@@ -89,11 +90,40 @@ func createKey(path string) ([]byte, error) {
 		os.Remove(path)
 		return nil, err
 	}
+	// sync the file and its directory before anything is sealed with the key,
+	// so a crash can't leave ciphertexts in the database and the key file
+	// empty or missing
+	if err := f.Sync(); err != nil {
+		f.Close()
+		os.Remove(path)
+		return nil, err
+	}
 	if err := f.Close(); err != nil {
 		os.Remove(path)
 		return nil, err
 	}
+	if err := syncDir(filepath.Dir(path)); err != nil {
+		os.Remove(path)
+		return nil, err
+	}
 	return key, nil
+}
+
+// syncDir makes a new directory entry durable. Windows can't sync a
+// directory, and doesn't need to.
+func syncDir(dir string) error {
+	if runtime.GOOS == "windows" {
+		return nil
+	}
+	d, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	if err := d.Sync(); err != nil {
+		d.Close()
+		return err
+	}
+	return d.Close()
 }
 
 // Seal encrypts plaintext for the row with the given ID. The result is the
@@ -102,7 +132,7 @@ func (b *Box) Seal(id int64, plaintext []byte) []byte {
 	out := make([]byte, 1+b.aead.NonceSize(), 1+b.aead.NonceSize()+len(plaintext)+b.aead.Overhead())
 	out[0] = version
 	rand.Read(out[1:])
-	return b.aead.Seal(out, out[1:], plaintext, additionalData(id))
+	return b.aead.Seal(out, out[1:], plaintext, additionalData(version, id))
 }
 
 // Open decrypts a value sealed for the row with the given ID.
@@ -110,15 +140,16 @@ func (b *Box) Open(id int64, sealed []byte) ([]byte, error) {
 	if len(sealed) == 0 {
 		return nil, ErrDecrypt
 	}
-	if sealed[0] != version {
-		return nil, fmt.Errorf("%w: %d", ErrUnsupportedVersion, sealed[0])
+	v := sealed[0]
+	if v != version {
+		return nil, fmt.Errorf("%w: %d", ErrUnsupportedVersion, v)
 	}
 	sealed = sealed[1:]
 	if len(sealed) < b.aead.NonceSize()+b.aead.Overhead() {
 		return nil, ErrDecrypt
 	}
 	nonce, ciphertext := sealed[:b.aead.NonceSize()], sealed[b.aead.NonceSize():]
-	plaintext, err := b.aead.Open(nil, nonce, ciphertext, additionalData(id))
+	plaintext, err := b.aead.Open(nil, nonce, ciphertext, additionalData(v, id))
 	if err != nil {
 		return nil, ErrDecrypt
 	}
@@ -126,10 +157,12 @@ func (b *Box) Open(id int64, sealed []byte) ([]byte, error) {
 }
 
 // additionalData covers the version byte as well as the ID, so changing the
-// version byte of a sealed value also makes it fail to open.
-func additionalData(id int64) []byte {
+// version byte of a sealed value also makes it fail to open. It takes the
+// version of the value being sealed or opened, not the current version, so
+// older values still open once there is more than one.
+func additionalData(v byte, id int64) []byte {
 	ad := make([]byte, 9)
-	ad[0] = version
+	ad[0] = v
 	binary.BigEndian.PutUint64(ad[1:], uint64(id))
 	return ad
 }

@@ -3,6 +3,7 @@ package serve
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -11,6 +12,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -108,9 +111,50 @@ func addConnected(t *testing.T, p *SessionPool, name string) *upstream {
 	conn, remote := net.Pipe()
 	t.Cleanup(func() { remote.Close() })
 	id := upstreamID(t, p.db, name)
-	u := &upstream{pool: p, id: id, name: name, telnetSession: newSession(conn, logger)}
+	connected := make(chan struct{})
+	close(connected)
+	u := &upstream{pool: p, id: id, name: name, telnetSession: newSession(conn, logger), connecting: connected}
 	p.streams[id] = u
 	return u
+}
+
+// holdDials makes each dial to a game wait until n dials have started, or
+// until wait has passed, so that concurrent logins overlap. It returns the
+// number of dials started.
+func holdDials(t *testing.T, n int32, wait time.Duration) *atomic.Int32 {
+	t.Helper()
+	var started atomic.Int32
+	all := make(chan struct{})
+	var once sync.Once
+	real := dial
+	dial = func(ctx context.Context, network, addr string) (net.Conn, error) {
+		if started.Add(1) == n {
+			once.Do(func() { close(all) })
+		}
+		select {
+		case <-all:
+		case <-time.After(wait):
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+		return real(ctx, network, addr)
+	}
+	t.Cleanup(func() { dial = real })
+	return &started
+}
+
+// setLoginTimeout changes loginTimeout for the rest of the test.
+func setLoginTimeout(t *testing.T, d time.Duration) {
+	t.Helper()
+	old := loginTimeout
+	loginTimeout = d
+	t.Cleanup(func() { loginTimeout = old })
+}
+
+// countDials counts dials to games, without holding them.
+func countDials(t *testing.T) *atomic.Int32 {
+	t.Helper()
+	return holdDials(t, 1, 0)
 }
 
 func poolSize(p *SessionPool) int {
@@ -123,18 +167,40 @@ func poolSize(p *SessionPool) int {
 // returned channel.
 func listenUpstream(t *testing.T) (string, <-chan string) {
 	t.Helper()
+	addr, lines, _ := listenGame(t)
+	return addr, lines
+}
+
+// listenGame is like listenUpstream, but also returns a function that sends
+// text from the game to Iris.
+func listenGame(t *testing.T) (string, <-chan string, func(string)) {
+	t.Helper()
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { l.Close() })
 	lines := make(chan string, 16)
+	accepted := make(chan net.Conn, 1)
+	send := func(text string) {
+		t.Helper()
+		select {
+		case conn := <-accepted:
+			defer func() { accepted <- conn }()
+			if _, err := io.WriteString(conn, text); err != nil {
+				t.Fatalf("game sending %q: %v", text, err)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("Iris never connected to the game")
+		}
+	}
 	go func() {
 		conn, err := l.Accept()
 		if err != nil {
 			return
 		}
 		defer conn.Close()
+		accepted <- conn
 		conn.SetReadDeadline(time.Now().Add(5 * time.Second))
 		r := bufio.NewReader(conn)
 		for {
@@ -146,7 +212,24 @@ func listenUpstream(t *testing.T) (string, <-chan string) {
 			lines <- line
 		}
 	}()
-	return l.Addr().String(), lines
+	return l.Addr().String(), lines, send
+}
+
+// waitForHistory waits until the named upstream's history log contains want.
+func waitForHistory(t *testing.T, name, want string) {
+	t.Helper()
+	path := filepath.Join(viper.GetString("log.dir"), time.Now().Format("2006-01-02")+"-"+name+".log")
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		b, _ := os.ReadFile(path)
+		if strings.Contains(string(b), want) {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("history never contained %q: %q", want, b)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }
 
 // waitForLine returns the first line from lines that contains want.
@@ -197,9 +280,6 @@ func TestLoginConnectedUpstream(t *testing.T) {
 	}
 	if poolSize(p) != 1 {
 		t.Errorf("pool size = %d", poolSize(p))
-	}
-	if d.Password != "" {
-		t.Error("client's password was kept after login")
 	}
 }
 
@@ -269,8 +349,8 @@ func TestLoginUnconnectedUpstreamWrongPassword(t *testing.T) {
 }
 
 func TestLoginUpstreamPasswordNotSet(t *testing.T) {
-	addr, lines := listenUpstream(t)
-	p := newTestPool(t, addr)
+	p := newTestPool(t, "unused:1")
+	dials := countDials(t)
 	if _, err := p.db.Exec("UPDATE upstreams SET password=NULL"); err != nil {
 		t.Fatal(err)
 	}
@@ -285,12 +365,8 @@ func TestLoginUpstreamPasswordNotSet(t *testing.T) {
 	if got := output(); !strings.Contains(got, "login failed: upstream password not set") {
 		t.Errorf("client received %q", got)
 	}
-	select {
-	case line, ok := <-lines:
-		if ok {
-			t.Errorf("connected to upstream without a password, sent %q", line)
-		}
-	case <-time.After(100 * time.Millisecond):
+	if n := dials.Load(); n != 0 {
+		t.Errorf("dialed the game %d times without a password", n)
 	}
 }
 
@@ -301,10 +377,14 @@ func TestLoginUpstreamPasswordUndecryptable(t *testing.T) {
 		t.Fatal(err)
 	}
 	p.box = other
+	dials := countDials(t)
 
 	_, output, err := loginOutput(t, p, loginMsg("game", testIrisPassword))
 	if !errors.Is(err, secret.ErrDecrypt) {
 		t.Fatalf("got %v", err)
+	}
+	if n := dials.Load(); n != 0 {
+		t.Errorf("dialed the game %d times without a password", n)
 	}
 	if poolSize(p) != 0 {
 		t.Errorf("pool size = %d", poolSize(p))
@@ -391,7 +471,7 @@ func TestLoginConnectScript(t *testing.T) {
 func TestLoginErrorMessages(t *testing.T) {
 	p := newTestPool(t, "unused:1")
 	for msg, want := range map[string]string{
-		loginMsg("game", "wrong"):          "login failed: incorrect password",
+		loginMsg("game", "wrong"):          "login failed: incorrect Iris password",
 		loginMsg("nope", testIrisPassword): "login failed: upstream not found",
 		`not json`:                         "login failed: invalid login",
 		`{"name":42}`:                      "login failed: invalid login",
@@ -407,10 +487,28 @@ func TestLoginErrorMessages(t *testing.T) {
 	}
 }
 
+func TestLoginErrorBeforeAuthIsHidden(t *testing.T) {
+	p := newTestPool(t, "unused:1")
+	if _, err := p.db.Exec("DROP TABLE iris_auth"); err != nil {
+		t.Fatal(err)
+	}
+
+	_, output, err := loginOutput(t, p, loginMsg("game", testIrisPassword))
+	if err == nil || !strings.Contains(err.Error(), "no such table") {
+		t.Fatalf("got %v", err)
+	}
+	got := output()
+	if !strings.Contains(got, "login failed: internal error") {
+		t.Errorf("client received %q, want internal error", got)
+	}
+	if strings.Contains(got, "no such table") {
+		t.Errorf("client received the database error: %q", got)
+	}
+}
+
 func TestLoginTimeout(t *testing.T) {
 	p := newTestPool(t, "unused:1")
-	loginTimeout = 50 * time.Millisecond
-	t.Cleanup(func() { loginTimeout = 30 * time.Second })
+	setLoginTimeout(t, 50*time.Millisecond)
 
 	type result struct {
 		output func() string
@@ -439,8 +537,7 @@ func TestLoginTimeout(t *testing.T) {
 func TestLoginTimeoutClearedAfterLogin(t *testing.T) {
 	p := newTestPool(t, "unused:1")
 	addConnected(t, p, "game")
-	loginTimeout = 50 * time.Millisecond
-	t.Cleanup(func() { loginTimeout = 30 * time.Second })
+	setLoginTimeout(t, 50*time.Millisecond)
 
 	client, server := net.Pipe()
 	t.Cleanup(func() { client.Close(); server.Close() })
@@ -534,11 +631,250 @@ func TestLoginReusedNameGetsNewSession(t *testing.T) {
 	}
 }
 
-func TestConnectAfterClose(t *testing.T) {
+func TestConcurrentLoginsConnectOnce(t *testing.T) {
+	addr, lines, send := listenGame(t)
+	p := newTestPool(t, addr)
+	dials := holdDials(t, 2, 500*time.Millisecond)
+
+	type result struct {
+		d      *downstream
+		output func() string
+		err    error
+	}
+	results := make(chan result, 2)
+	for range 2 {
+		go func() {
+			d, output, err := loginOutput(t, p, loginMsg("game", testIrisPassword))
+			results <- result{d, output, err}
+		}()
+	}
+	var rs []result
+	for range 2 {
+		r := <-results
+		if r.err != nil {
+			t.Fatal(r.err)
+		}
+		rs = append(rs, r)
+	}
+
+	if n := dials.Load(); n != 1 {
+		t.Errorf("dialed the game %d times", n)
+	}
+	if rs[0].d.upstream != rs[1].d.upstream {
+		t.Fatal("clients were attached to different upstreams")
+	}
+	waitForLine(t, lines, "connect me")
+
+	// Iris only reads the game's second line once it has written the first
+	// to every client, so once the second is in the history log, both
+	// clients have the first
+	send("welcome\n")
+	waitForHistory(t, "game", "welcome")
+	send("second\n")
+	waitForHistory(t, "game", "second")
+	for i, r := range rs {
+		if got := r.output(); !strings.Contains(got, "welcome") {
+			t.Errorf("client %d received %q, want the game's output", i, got)
+		}
+	}
+	// the connect script was sent once, and nothing else
+	select {
+	case line := <-lines:
+		t.Errorf("upstream received another line %q", line)
+	default:
+	}
+}
+
+// stuckClient is a client that never reads: writes block until it is
+// closed.
+type stuckClient struct {
+	writing chan struct{}
+	closed  chan struct{}
+	once    sync.Once
+}
+
+func newStuckClient() *stuckClient {
+	return &stuckClient{writing: make(chan struct{}, 1), closed: make(chan struct{})}
+}
+
+func (c *stuckClient) Write(p []byte) (int, error) {
+	select {
+	case c.writing <- struct{}{}:
+	default:
+	}
+	<-c.closed
+	return 0, net.ErrClosed
+}
+
+func (c *stuckClient) Close() error {
+	c.once.Do(func() { close(c.closed) })
+	return nil
+}
+
+func TestDeleteWithStuckClient(t *testing.T) {
+	addr, _, send := listenGame(t)
+	p := newTestPool(t, addr)
+	d, err := login(t, p, loginMsg("game", testIrisPassword))
+	if err != nil {
+		t.Fatal(err)
+	}
+	stuck := newStuckClient()
+	d.upstream.AddDownstream(stuck)
+
+	// the game's output leaves the upstream's read loop blocked writing to
+	// the stuck client
+	send("hello\n")
+	select {
+	case <-stuck.writing:
+	case <-time.After(5 * time.Second):
+		t.Fatal("game output never reached the stuck client")
+	}
+
+	done := make(chan struct{})
+	go func() {
+		p.closeUpstream(upstreamID(t, p.db, "game"))
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("a client that isn't reading blocked deleting the upstream")
+	}
+}
+
+func TestConcurrentLoginWhenFirstFails(t *testing.T) {
+	p := newTestPool(t, "unused:1")
+	real := dial
+	dial = func(context.Context, string, string) (net.Conn, error) {
+		return nil, errors.New("connection refused")
+	}
+	t.Cleanup(func() { dial = real })
+	holdDials(t, 2, 500*time.Millisecond)
+
+	type result struct {
+		output string
+		err    error
+	}
+	results := make(chan result, 2)
+	for range 2 {
+		go func() {
+			_, output, err := loginOutput(t, p, loginMsg("game", testIrisPassword))
+			results <- result{output(), err}
+		}()
+	}
+	var outputs []string
+	for range 2 {
+		r := <-results
+		if r.err == nil {
+			t.Fatal("login succeeded")
+		}
+		outputs = append(outputs, r.output)
+	}
+	if poolSize(p) != 0 {
+		t.Errorf("pool size = %d", poolSize(p))
+	}
+	// both clients are told why, including the one that was waiting
+	for _, want := range []string{"login failed: error connecting", "login failed: " + errUpstreamNotConnected.Error()} {
+		if !strings.Contains(outputs[0], want) && !strings.Contains(outputs[1], want) {
+			t.Errorf("no client received %q: %q", want, outputs)
+		}
+	}
+}
+
+func TestConnectAfterCloseDoesNotDial(t *testing.T) {
+	p := newTestPool(t, "unused:1")
+	dials := countDials(t)
+	u := p.upstreamFor(upstreamID(t, p.db, "game"), "game")
+	u.Close()
+
+	if err := u.Connect("unused:1"); !errors.Is(err, errUpstreamClosed) {
+		t.Fatalf("got %v", err)
+	}
+	if n := dials.Load(); n != 0 {
+		t.Errorf("dialed the game %d times", n)
+	}
+}
+
+func TestCloseCancelsDial(t *testing.T) {
+	p := newTestPool(t, "unused:1")
+	started := make(chan struct{})
+	real := dial
+	dial = func(ctx context.Context, network, addr string) (net.Conn, error) {
+		close(started)
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+	t.Cleanup(func() { dial = real })
+	id := upstreamID(t, p.db, "game")
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := login(t, p, loginMsg("game", testIrisPassword))
+		done <- err
+	}()
+	<-started
+	p.closeUpstream(id)
+
+	select {
+	case err := <-done:
+		if !errors.Is(err, errUpstreamClosed) {
+			t.Errorf("got %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("deleting the upstream didn't cancel the dial")
+	}
+}
+
+func TestDialTimeout(t *testing.T) {
+	p := newTestPool(t, "unused:1")
+	old := dialTimeout
+	dialTimeout = 50 * time.Millisecond
+	t.Cleanup(func() { dialTimeout = old })
+	real := dial
+	dial = func(ctx context.Context, network, addr string) (net.Conn, error) {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+	t.Cleanup(func() { dial = real })
+
+	type result struct {
+		output func() string
+		err    error
+	}
+	done := make(chan result, 1)
+	go func() {
+		_, output, err := loginOutput(t, p, loginMsg("game", testIrisPassword))
+		done <- result{output, err}
+	}()
+	var r result
+	select {
+	case r = <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("dial didn't time out")
+	}
+	if !errors.Is(r.err, context.DeadlineExceeded) {
+		t.Fatalf("got %v", r.err)
+	}
+	if got := r.output(); !strings.Contains(got, "login failed: error connecting") {
+		t.Errorf("client received %q", got)
+	}
+	if poolSize(p) != 0 {
+		t.Errorf("pool size = %d", poolSize(p))
+	}
+}
+
+func TestCloseWhileDialing(t *testing.T) {
 	addr, lines := listenUpstream(t)
 	p := newTestPool(t, addr)
 	u := p.upstreamFor(upstreamID(t, p.db, "game"), "game")
-	u.Close()
+	// closing just after the dial succeeds, before the connection is used
+	real := dial
+	dial = func(ctx context.Context, network, addr string) (net.Conn, error) {
+		conn, err := real(ctx, network, addr)
+		u.Close()
+		return conn, err
+	}
+	t.Cleanup(func() { dial = real })
 
 	if err := u.Connect(addr); !errors.Is(err, errUpstreamClosed) {
 		t.Fatalf("got %v", err)

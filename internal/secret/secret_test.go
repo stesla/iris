@@ -56,6 +56,8 @@ func TestOpenWrongKey(t *testing.T) {
 func TestOpenTampered(t *testing.T) {
 	box := newTestBox(t)
 	sealed := box.Seal(1, []byte("hunter2"))
+	// start after the version byte: changing it gives ErrUnsupportedVersion,
+	// which TestOpenMalformed checks
 	for i := 1; i < len(sealed); i++ {
 		tampered := bytes.Clone(sealed)
 		tampered[i] ^= 1
@@ -110,6 +112,13 @@ func TestLoadKeyBadPermissions(t *testing.T) {
 	require.NoError(t, os.WriteFile(path, []byte(hex.EncodeToString(make([]byte, KeySize))), 0o644))
 	_, err := LoadOrCreateKey(path)
 	require.ErrorContains(t, err, "must not be accessible")
+}
+
+func TestLoadKeyReadOnly(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "iris.key")
+	require.NoError(t, os.WriteFile(path, []byte(hex.EncodeToString(make([]byte, KeySize))), 0o400))
+	_, err := LoadOrCreateKey(path)
+	require.NoError(t, err)
 }
 
 func TestLoadKeyWithoutNewline(t *testing.T) {

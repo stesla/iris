@@ -8,7 +8,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -17,21 +16,9 @@ import (
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/stesla/iris/api"
+	"github.com/stesla/iris/internal/database/dbtest"
 	"github.com/stesla/iris/internal/secret"
 )
-
-const testSchema = `CREATE TABLE upstreams (
-	id       INTEGER PRIMARY KEY AUTOINCREMENT,
-	name     TEXT NOT NULL UNIQUE,
-	address  TEXT NOT NULL,
-	login    TEXT NOT NULL,
-	password BLOB,
-	script   TEXT
-);
-CREATE TABLE iris_auth (
-	id     INTEGER PRIMARY KEY CHECK (id = 1),
-	bcrypt TEXT NOT NULL
-)`
 
 const testIrisPassword = "iris-secret"
 
@@ -58,28 +45,27 @@ func newTestBox(t *testing.T) *secret.Box {
 	return box
 }
 
-// newTestDB returns a database with the current schema and the Iris password
-// set to testIrisPassword.
+// newTestDB returns a migrated database with the Iris password set to
+// testIrisPassword.
 func newTestDB(t *testing.T) *sql.DB {
 	t.Helper()
-	db, err := sql.Open("sqlite3", filepath.Join(t.TempDir(), "test.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { db.Close() })
-	if _, err := db.Exec(testSchema); err != nil {
-		t.Fatal(err)
-	}
+	db := dbtest.New(t)
+	setTestPassword(t, db)
+	return db
+}
+
+// setTestPassword sets the Iris password in db to testIrisPassword.
+func setTestPassword(t *testing.T, db *sql.DB) {
+	t.Helper()
 	// MinCost rather than auth.SetPassword's DefaultCost, since every request
 	// and login checks it
 	hash, err := bcrypt.GenerateFromPassword([]byte(testIrisPassword), bcrypt.MinCost)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec("INSERT INTO iris_auth (id, bcrypt) VALUES (1, ?)", hash); err != nil {
+	if _, err := db.Exec("INSERT INTO iris_auth (id, password_hash) VALUES (1, ?)", hash); err != nil {
 		t.Fatal(err)
 	}
-	return db
 }
 
 func newTestAPI(t *testing.T) (*api.Client, *apiServer, *httptest.Server) {

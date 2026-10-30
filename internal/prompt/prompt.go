@@ -8,7 +8,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 
 	"golang.org/x/term"
 )
@@ -21,8 +23,30 @@ func IsTerminal() bool {
 
 // Password prompts for a password, as "<name>: ".
 func Password(name string) (string, error) {
+	fd := int(os.Stdin.Fd())
+	state, err := term.GetState(fd)
+	if err != nil {
+		return "", err
+	}
+	// ReadPassword turns off echo but leaves signals on, so Ctrl-C would exit
+	// before it restores the terminal and leave echo off in the shell
+	signals := make(chan os.Signal, 1)
+	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
+	done := make(chan struct{})
+	defer close(done)
+	defer signal.Stop(signals)
+	go func() {
+		select {
+		case <-signals:
+			term.Restore(fd, state)
+			fmt.Fprintln(os.Stderr)
+			os.Exit(130)
+		case <-done:
+		}
+	}()
+
 	fmt.Fprintf(os.Stderr, "%s: ", name)
-	password, err := term.ReadPassword(int(os.Stdin.Fd()))
+	password, err := term.ReadPassword(fd)
 	fmt.Fprintln(os.Stderr)
 	return string(password), err
 }
@@ -60,7 +84,8 @@ func ReadNewPassword(name string) (password string, err error) {
 	return password, err
 }
 
-// Line reads the first line of r, without its line ending.
+// Line reads the first line of r, without its line ending. It may read past
+// the first line, so the rest of r can't be read afterwards.
 func Line(r io.Reader) (string, error) {
 	line, err := bufio.NewReader(r).ReadString('\n')
 	if err != nil && !errors.Is(err, io.EOF) {

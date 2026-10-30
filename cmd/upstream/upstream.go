@@ -35,13 +35,13 @@ func init() {
 	pkgcmd.PersistentFlags().StringVarP(&address, "address", "a", "", "address for upstream session")
 	pkgcmd.PersistentFlags().StringVarP(&login, "login", "l", "", "login for upstream session")
 	pkgcmd.PersistentFlags().StringVarP(&newName, "name", "n", "", "name for upstream session")
-	pkgcmd.PersistentFlags().StringVarP(&password, "password", "p", "", "password for upstream session, or - to prompt for it (edit only)")
+	pkgcmd.PersistentFlags().StringVarP(&password, "password", "p", "", "password for upstream session, or - to prompt for it")
 	pkgcmd.PersistentFlags().StringVarP(&script, "script", "s", "", "connect script")
 	pkgcmd.AddCommand(&cobra.Command{
-		Use:   "add NAME [PASSWORD]",
+		Use:   "add NAME -a ADDRESS -l LOGIN -p PASSWORD",
 		Short: "add a new upstream",
-		Long:  "Add a new upstream. PASSWORD is the password for the upstream account, which Iris sends in the connect script. If it is omitted, it is prompted for, or read from the first line of standard input if that is not a terminal.",
-		Args:  cobra.RangeArgs(1, 2),
+		Long:  "Add a new upstream. The password (-p) is the password for the upstream account, which Iris sends in the connect script, and is required. With -p -, it is prompted for, or read from the first line of standard input if that is not a terminal, so it stays out of shell history.",
+		Args:  cobra.ExactArgs(1),
 		RunE:  Add,
 	})
 	pkgcmd.AddCommand(&cobra.Command{
@@ -70,23 +70,30 @@ func AddToCommand(cmd *cobra.Command) {
 }
 
 func Add(cmd *cobra.Command, args []string) error {
+	if password == "" {
+		return errors.New("password is required: use -p PASSWORD, or -p - to be prompted for it")
+	}
+	req := &api.AddUpstreamRequest{
+		Name:     args[0],
+		Address:  address,
+		Login:    login,
+		Password: password,
+	}
+	if script != "" {
+		req.Script = &script
+	}
+	// validate before prompting, so nothing is typed for a request that would
+	// fail; "-" passes as a password until it is replaced
+	if err := req.Validate(); err != nil {
+		return err
+	}
+
 	client, err := newClient()
 	if err != nil {
 		return err
 	}
-
-	req := &api.AddUpstreamRequest{
-		Name:    args[0],
-		Address: address,
-		Login:   login,
-	}
-	if len(args) > 1 {
-		req.Password = args[1]
-	} else if req.Password, err = prompt.ReadNewPassword("upstream password"); err != nil {
+	if req.Password, err = readPassword(req.Password); err != nil {
 		return err
-	}
-	if script != "" {
-		req.Script = &script
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
@@ -106,11 +113,6 @@ func Delete(cmd *cobra.Command, args []string) error {
 }
 
 func Edit(cmd *cobra.Command, args []string) error {
-	client, err := newClient()
-	if err != nil {
-		return err
-	}
-
 	req := &api.EditUpstreamRequest{}
 	if address != "" {
 		req.Address = &address
@@ -121,16 +123,28 @@ func Edit(cmd *cobra.Command, args []string) error {
 	if newName != "" {
 		req.NewName = &newName
 	}
-	if password == "-" {
-		if password, err = prompt.ReadNewPassword("upstream password"); err != nil {
-			return err
-		}
-	}
 	if password != "" {
 		req.Password = &password
 	}
 	if script != "" {
 		req.Script = &script
+	}
+	// validate before prompting, so nothing is typed for a request that would
+	// fail; "-" passes as a password until it is replaced
+	if err := req.Validate(); err != nil {
+		return err
+	}
+
+	client, err := newClient()
+	if err != nil {
+		return err
+	}
+	if req.Password != nil {
+		p, err := readPassword(*req.Password)
+		if err != nil {
+			return err
+		}
+		req.Password = &p
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
@@ -157,6 +171,15 @@ func List(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(w, "%s\t%s\t%s\n", u.Name, u.Address, u.Login)
 	}
 	return w.Flush()
+}
+
+// readPassword returns the upstream password given with -p, or prompts for
+// it if that is "-".
+func readPassword(flag string) (string, error) {
+	if flag != "-" {
+		return flag, nil
+	}
+	return prompt.ReadNewPassword("upstream password")
 }
 
 // newClient returns a client for the management API, authenticated with the

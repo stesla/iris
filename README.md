@@ -68,7 +68,7 @@ Iris has a single password, used to log in from Telnet clients and by the `iris 
 ./iris password
 ```
 
-This prompts for the password twice, or reads it from the first line of standard input if that isn't a terminal. It writes directly to the database, so it works whether or not the server is running. Run it again to change the password.
+This prompts for the password twice, or reads it from the first line of standard input if that isn't a terminal. It writes directly to the database, so it works whether or not the server is running. Run it again to change the password. It refuses a database that doesn't exist or hasn't been migrated, before prompting.
 
 ### Running the Server
 
@@ -84,16 +84,16 @@ Then start the server:
 ./iris serve
 ```
 
-By default this starts the Telnet proxy on port 4042 and the management API on `localhost:40042`. The server refuses to start until an Iris password has been set.
+By default this starts the Telnet proxy on port 4042 and the management API on `localhost:40042`. The server refuses to start if the database doesn't exist or hasn't been migrated, or if no Iris password has been set.
 
 On first start, Iris creates the encryption key for upstream passwords at `secret.key_file` (default `./iris.key`); see [Encryption Key](#encryption-key).
 
 ### Adding an Upstream
 
-Use the command line client to add an upstream server. The password is the upstream account's password, which Iris sends in the connect script. If you leave it off, you're prompted for it, which keeps it out of your shell history:
+Use the command line client to add an upstream server. The password is the upstream account's password, which Iris sends in the connect script. With `-p -`, you're prompted for it, which keeps it out of your shell history:
 
 ```bash
-./iris upstream add mygame -a game.example.com:4201 -l mycharacter
+./iris upstream add mygame -a game.example.com:4201 -l mycharacter -p -
 ```
 
 The command line client prompts for the Iris password, unless it is set in `api.client.password` (see [Configuration](#configuration)).
@@ -112,9 +112,9 @@ The first thing the client sends must be a JSON object naming the upstream, with
 {"name": "mygame", "password": "iris-password"}
 ```
 
-If the upstream is already connected, Iris attaches the client to it and replays recent history. Otherwise Iris connects to the upstream's address, sends the connect script with the upstream's stored password, and starts recording history. From then on, everything the client sends goes to the upstream.
+If the upstream is already connected, Iris attaches the client to it and replays recent history. Otherwise Iris connects to the upstream's address, sends the connect script with the upstream's stored password, and starts recording history. Iris gives up connecting after 30 seconds. If another client is already connecting the upstream, Iris waits for that to finish and then attaches this client too, or fails its login with `upstream failed to connect`. From then on, everything the client sends goes to the upstream.
 
-The login must arrive within 30 seconds and be at most 64 KiB. If it fails, Iris sends a line saying why (for example `login failed: incorrect password`) and disconnects. The Iris password is checked before the upstream is looked up, so a client without it can't find out which upstreams exist.
+The login must arrive within 30 seconds and be at most 64 KiB. If it fails, Iris sends a line saying why (for example `login failed: incorrect Iris password`) and disconnects. The Iris password is checked before the upstream is looked up, so a client without it can't find out which upstreams exist. For the same reason, an unexpected error before the password has been checked, such as a database error, is only reported as `internal error`; the details go to the server log.
 
 When opening a new upstream connection, the client can also set upstream options:
 
@@ -127,7 +127,7 @@ When opening a new upstream connection, the client can also set upstream options
 | `always_allow_charset` | Allow charset negotiation without Transmit Binary | `true` or `false` |
 | `force_suppress_go_ahead` | Force suppression of GA signals | `true` or `false` |
 
-Options are ignored when joining an upstream that is already connected.
+Options are ignored when joining an upstream that is already connected, or that another client is still connecting.
 
 ## Configuration
 
@@ -187,8 +187,8 @@ Earlier versions had no Iris password: each upstream's password was used to log 
 `iris upstream` manages upstreams through the management API, using `api.client.url` to find the server. It authenticates with the Iris password from `api.client.password`, or prompts for it.
 
 ```bash
-# Add an upstream (requires --address and --login); PASSWORD is prompted for if omitted
-iris upstream add NAME [PASSWORD] -a HOST:PORT -l LOGIN [-s SCRIPT]
+# Add an upstream (requires --address, --login, and --password)
+iris upstream add NAME -a HOST:PORT -l LOGIN -p PASSWORD|- [-s SCRIPT]
 
 # List upstreams
 iris upstream list
@@ -206,15 +206,15 @@ iris upstream delete NAME
 | `-l`, `--login` | Login used in the connect script |
 | `-s`, `--script` | Connect script |
 | `-n`, `--name` | New name (`edit` only) |
-| `-p`, `--password` | New upstream password, or `-` to be prompted for it (`edit` only) |
+| `-p`, `--password` | Upstream password, or `-` to be prompted for it |
 
-When `add` has no `PASSWORD`, or `edit` is given `-p -`, the upstream password is prompted for twice. If standard input isn't a terminal, it is read from the first line of standard input instead, so it can be piped in from a password manager.
+With `-p -`, the upstream password is prompted for twice. If standard input isn't a terminal, it is read from the first line of standard input instead, so it can be piped in from a password manager.
 
 Upstream names can be up to 64 letters, digits, `.`, `_`, and `-`, and must start with a letter or digit. Names are used in history log file names.
 
 The connect script is sent to the upstream when Iris connects to it. `%LOGIN%` and `%PASSWORD%` are replaced with the upstream's login and its stored password. If no script is set, Iris sends `connect %LOGIN% %PASSWORD%`.
 
-The client exits with status 1 if a request fails.
+Arguments and flags are checked before any password is prompted for. The client exits with status 1 if a request fails.
 
 ## Commands
 
@@ -311,7 +311,7 @@ Deletes an upstream. The request has no body. If the upstream is connected, Iris
 Errors return a JSON body with a message:
 
 ```json
-{"error": "incorrect password"}
+{"error": "incorrect Iris password"}
 ```
 
 | Status | Meaning |
@@ -355,6 +355,8 @@ Iris follows a modular architecture with clear separation of concerns:
 - *api/*: Management API types and Go client
 - *migrations/*: Database migrations, run with goose
 - *internal/auth/*: Checking and setting the Iris password
+- *internal/database/*: Opening the database, refusing one that is missing or unmigrated
+  - *dbtest/*: Databases for tests, built by applying the real migrations
 - *internal/secret/*: Encryption of upstream passwords, and the key file
 - *internal/prompt/*: Password prompts for the command line
 - *internal/event/*: Lightweight event dispatcher for decoupled protocol handling
@@ -392,23 +394,29 @@ iris/
 ├── cmd/
 │   ├── root.go          # Root command and configuration
 │   ├── password/        # `iris password`
-│   │   └── password.go
+│   │   ├── password.go
+│   │   └── password_test.go
 │   ├── serve/           # `iris serve`
 │   │   ├── log.go       # Logging integration
 │   │   ├── rest.go      # Management API handlers
 │   │   ├── rest_test.go
-│   │   ├── schema_test.go # Checks the test schema matches the migrations
 │   │   ├── serve.go     # Server startup and signal handling
+│   │   ├── serve_test.go
 │   │   ├── session.go   # Session management logic
 │   │   └── session_test.go
 │   └── upstream/        # `iris upstream`
 │       ├── upstream.go
 │       └── upstream_test.go
 ├── migrations/          # goose database migrations
+│   └── embed.go         # Embeds the migrations, for tests
 └── internal/
     ├── auth/            # The Iris password
     │   ├── auth.go
     │   └── auth_test.go
+    ├── database/        # Opening the database
+    │   ├── database.go
+    │   ├── database_test.go
+    │   └── dbtest/      # Migrated databases for tests
     ├── event/           # Event system implementation
     │   ├── event.go
     │   └── event_test.go
@@ -484,7 +492,7 @@ go test ./internal/event/...
 go test ./api/... ./cmd/serve/...
 
 # Encryption, password, and command line tests
-go test ./internal/secret/... ./internal/auth/... ./internal/prompt/... ./cmd/upstream/...
+go test ./internal/secret/... ./internal/auth/... ./internal/database/... ./internal/prompt/... ./cmd/password/... ./cmd/upstream/...
 ```
 
 ## License

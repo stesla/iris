@@ -3,28 +3,23 @@ package auth
 import (
 	"context"
 	"database/sql"
-	"path/filepath"
 	"strings"
 	"testing"
 
-	_ "github.com/mattn/go-sqlite3"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/bcrypt"
+
+	"github.com/stesla/iris/internal/database/dbtest"
 )
 
-const testSchema = `CREATE TABLE iris_auth (
-	id     INTEGER PRIMARY KEY CHECK (id = 1),
-	bcrypt TEXT NOT NULL
-)`
-
+// newTestDB returns a migrated database, and lowers the bcrypt cost for the
+// test so it stays fast.
 func newTestDB(t *testing.T) *sql.DB {
 	t.Helper()
-	db, err := sql.Open("sqlite3", filepath.Join(t.TempDir(), "test.db"))
-	require.NoError(t, err)
-	t.Cleanup(func() { db.Close() })
-	_, err = db.Exec(testSchema)
-	require.NoError(t, err)
-	return db
+	old := cost
+	cost = bcrypt.MinCost
+	t.Cleanup(func() { cost = old })
+	return dbtest.New(t)
 }
 
 func TestPasswordNotSet(t *testing.T) {
@@ -50,7 +45,7 @@ func TestSetAndCheckPassword(t *testing.T) {
 	require.ErrorIs(t, CheckPassword(ctx, db, ""), bcrypt.ErrMismatchedHashAndPassword)
 
 	var hash string
-	require.NoError(t, db.QueryRow("SELECT bcrypt FROM iris_auth").Scan(&hash))
+	require.NoError(t, db.QueryRow("SELECT password_hash FROM iris_auth").Scan(&hash))
 	require.NotContains(t, hash, "secret")
 }
 
@@ -75,4 +70,15 @@ func TestSetPasswordInvalid(t *testing.T) {
 	set, err := PasswordIsSet(ctx, db)
 	require.NoError(t, err)
 	require.False(t, set)
+}
+
+func TestSetPasswordUsesDefaultCost(t *testing.T) {
+	ctx, db := context.Background(), dbtest.New(t)
+	require.NoError(t, SetPassword(ctx, db, "secret"))
+
+	var hash string
+	require.NoError(t, db.QueryRow("SELECT password_hash FROM iris_auth").Scan(&hash))
+	got, err := bcrypt.Cost([]byte(hash))
+	require.NoError(t, err)
+	require.Equal(t, bcrypt.DefaultCost, got)
 }

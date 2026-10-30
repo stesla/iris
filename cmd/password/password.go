@@ -2,16 +2,14 @@ package password
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"os"
-	"strings"
 
-	_ "github.com/mattn/go-sqlite3"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
 	"github.com/stesla/iris/internal/auth"
+	"github.com/stesla/iris/internal/database"
 	"github.com/stesla/iris/internal/prompt"
 )
 
@@ -29,27 +27,19 @@ func SetPassword(cmd *cobra.Command, args []string) error {
 	// args have been validated by now, so any error isn't a usage error
 	cmd.SilenceUsage = true
 
-	path := viper.GetString("db")
-	// sql.Open would silently create an empty database
-	if _, err := os.Stat(path); err != nil {
-		return fmt.Errorf("opening database: %w", err)
-	}
-
-	password, err := prompt.ReadNewPassword("Iris password")
-	if err != nil {
-		return err
-	}
-
-	db, err := sql.Open("sqlite3", path)
+	// open before prompting, so the password isn't typed for nothing
+	ctx := context.Background()
+	db, err := database.Open(ctx, viper.GetString("db"))
 	if err != nil {
 		return err
 	}
 	defer db.Close()
 
-	if err := auth.SetPassword(context.Background(), db, password); err != nil {
-		if strings.Contains(err.Error(), "no such table") {
-			return fmt.Errorf("%w (have the migrations been run?)", err)
-		}
+	password, err := prompt.ReadNewPassword("Iris password")
+	if err != nil {
+		return err
+	}
+	if err := auth.SetPassword(ctx, db, password); err != nil {
 		return err
 	}
 	fmt.Fprintln(os.Stderr, "Iris password set.")

@@ -28,8 +28,8 @@ ALTER TABLE new_upstreams RENAME TO upstreams;
 -- The single global Iris password. Moves into a users table once Iris
 -- supports more than one user.
 CREATE TABLE iris_auth (
-       id     INTEGER PRIMARY KEY CHECK (id = 1),
-       bcrypt TEXT NOT NULL
+       id            INTEGER PRIMARY KEY CHECK (id = 1),
+       password_hash TEXT NOT NULL
 );
 
 -- +goose Down

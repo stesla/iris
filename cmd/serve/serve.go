@@ -12,12 +12,12 @@ import (
 	"syscall"
 	"time"
 
-	_ "github.com/mattn/go-sqlite3"
 	"github.com/rs/zerolog"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
 	"github.com/stesla/iris/internal/auth"
+	"github.com/stesla/iris/internal/database"
 	"github.com/stesla/iris/internal/secret"
 )
 
@@ -32,28 +32,43 @@ func AddToCommand(cmd *cobra.Command) {
 }
 
 func Serve(cmd *cobra.Command, args []string) {
-	db, err := sql.Open("sqlite3", viper.GetString("db"))
-	cobra.CheckErr(err)
-
 	if l, err := zerolog.ParseLevel(viper.GetString("log.level")); err != nil {
 		cobra.CheckErr(err)
 	} else {
+		// TODO: this discards the result, so log.level has no effect. It
+		// should be logger = logger.Level(l).
 		logger.Level(l)
 	}
 
-	if set, err := auth.PasswordIsSet(context.Background(), db); err != nil {
-		cobra.CheckErr(fmt.Errorf("checking iris password (have the migrations been run?): %w", err))
-	} else if !set {
-		cobra.CheckErr(errors.New("no iris password is set; run `iris password` to set one"))
-	}
-
-	box, err := secret.LoadOrCreateKey(viper.GetString("secret.key_file"))
+	db, box, err := prepare(context.Background())
 	cobra.CheckErr(err)
 
 	sessions := NewSessionPool(db, box, logger)
 
 	go runApiServer(db, sessions, box)
 	runTelnetProxy(sessions)
+}
+
+// prepare opens the database and loads the encryption key. It refuses to
+// start without an Iris password.
+func prepare(ctx context.Context) (*sql.DB, *secret.Box, error) {
+	db, err := database.Open(ctx, viper.GetString("db"))
+	if err != nil {
+		return nil, nil, err
+	}
+	if set, err := auth.PasswordIsSet(ctx, db); err != nil {
+		db.Close()
+		return nil, nil, fmt.Errorf("checking iris password: %w", err)
+	} else if !set {
+		db.Close()
+		return nil, nil, errors.New("no iris password is set; run `iris password` to set one")
+	}
+	box, err := secret.LoadOrCreateKey(viper.GetString("secret.key_file"))
+	if err != nil {
+		db.Close()
+		return nil, nil, err
+	}
+	return db, box, nil
 }
 
 func runApiServer(db *sql.DB, sessions *SessionPool, box *secret.Box) {

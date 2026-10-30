@@ -12,6 +12,10 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
+// cost is the bcrypt cost of new hashes. It is a variable so tests can lower
+// it.
+var cost = bcrypt.DefaultCost
+
 // ErrPasswordNotSet is returned when no Iris password has been set yet.
 var ErrPasswordNotSet = errors.New("iris password is not set")
 
@@ -19,7 +23,7 @@ var ErrPasswordNotSet = errors.New("iris password is not set")
 // bcrypt.ErrMismatchedHashAndPassword if it isn't.
 func CheckPassword(ctx context.Context, db *sql.DB, password string) error {
 	var hash string
-	err := db.QueryRowContext(ctx, "SELECT bcrypt FROM iris_auth WHERE id=1").Scan(&hash)
+	err := db.QueryRowContext(ctx, "SELECT password_hash FROM iris_auth WHERE id=1").Scan(&hash)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ErrPasswordNotSet
 	} else if err != nil {
@@ -33,12 +37,12 @@ func SetPassword(ctx context.Context, db *sql.DB, password string) error {
 	if password == "" {
 		return errors.New("iris password cannot be empty")
 	}
-	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), cost)
 	if err != nil {
 		return fmt.Errorf("iris password: %w", err)
 	}
 	_, err = db.ExecContext(ctx,
-		"INSERT INTO iris_auth (id, bcrypt) VALUES (1, ?) ON CONFLICT (id) DO UPDATE SET bcrypt=excluded.bcrypt",
+		"INSERT INTO iris_auth (id, password_hash) VALUES (1, ?) ON CONFLICT (id) DO UPDATE SET password_hash=excluded.password_hash",
 		hash,
 	)
 	return err
