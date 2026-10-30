@@ -11,6 +11,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1000,4 +1001,204 @@ func TestCloseAllAndReopenWithUnconnectedUpstream(t *testing.T) {
 
 	p.ReopenHistories()
 	p.CloseAll()
+}
+
+// useLogDir points log.dir at a temporary directory, which it returns.
+func useLogDir(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	viper.Set("log.dir", dir)
+	return dir
+}
+
+// readLogs returns the contents of every log file in dir. A test that runs
+// past midnight writes to two of them.
+func readLogs(t *testing.T, dir string) string {
+	t.Helper()
+	paths, err := filepath.Glob(filepath.Join(dir, "*.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var all strings.Builder
+	for _, path := range paths {
+		b, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		all.Write(b)
+	}
+	return all.String()
+}
+
+func TestLogFileConcurrentUse(t *testing.T) {
+	dir := useLogDir(t)
+	history, err := newHistory("stress")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer history.Close()
+
+	const writers, lines = 2, 500
+	var wg sync.WaitGroup
+	for w := range writers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range lines {
+				if _, err := fmt.Fprintf(history, "writer-%d-line-%d\n", w, i); err != nil {
+					t.Errorf("write: %v", err)
+					return
+				}
+			}
+		}()
+	}
+
+	done := make(chan struct{})
+	var background sync.WaitGroup
+	background.Add(2)
+	go func() {
+		defer background.Done()
+		for {
+			select {
+			case <-done:
+				return
+			default:
+			}
+			if err := history.Reopen("stress"); err != nil {
+				t.Errorf("reopen: %v", err)
+				return
+			}
+		}
+	}()
+	go func() {
+		defer background.Done()
+		for {
+			select {
+			case <-done:
+				return
+			default:
+			}
+			if _, err := history.WriteTo(io.Discard); err != nil {
+				t.Errorf("replay: %v", err)
+				return
+			}
+		}
+	}()
+
+	wg.Wait()
+	close(done)
+	background.Wait()
+
+	logs := readLogs(t, dir)
+	for w := range writers {
+		for i := range lines {
+			line := fmt.Sprintf("writer-%d-line-%d\n", w, i)
+			if got := strings.Count(logs, line); got != 1 {
+				t.Errorf("%q appears %d times", line, got)
+			}
+		}
+	}
+}
+
+func TestGameOutputDuringReopenHistories(t *testing.T) {
+	addr, _, send := listenGame(t)
+	p := newTestPool(t, addr)
+	d, err := login(t, p, loginMsg("game", testIrisPassword))
+	if err != nil {
+		t.Fatal(err)
+	}
+	u := d.upstream
+
+	done := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case <-done:
+				return
+			case <-time.After(time.Millisecond):
+				p.ReopenHistories()
+			}
+		}
+	}()
+
+	const lines = 500
+	for i := range lines {
+		send(fmt.Sprintf("line-%d\n", i))
+	}
+	waitForHistory(t, "game", fmt.Sprintf("line-%d\n", lines-1))
+	close(done)
+	wg.Wait()
+
+	u.state.Lock()
+	history := u.history
+	u.state.Unlock()
+	if !slices.Contains(u.clients(), io.WriteCloser(history)) {
+		t.Error("the history was dropped from the upstream's clients")
+	}
+	logs := readLogs(t, viper.GetString("log.dir"))
+	for i := range lines {
+		if line := fmt.Sprintf("line-%d\n", i); !strings.Contains(logs, line) {
+			t.Errorf("%q is missing from the log", line)
+		}
+	}
+}
+
+func TestLogFileReopenAfterClose(t *testing.T) {
+	dir := useLogDir(t)
+	history, err := newHistory("game")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := history.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := history.Reopen("other"); err == nil {
+		t.Error("no error")
+	}
+	if _, err := history.Write([]byte("late\n")); err == nil {
+		t.Error("write after close: no error")
+	}
+	paths, err := filepath.Glob(filepath.Join(dir, "*-other.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(paths) != 0 {
+		t.Errorf("reopened as %v", paths)
+	}
+}
+
+func TestLogFileReplayToStuckClientDoesNotBlockWrite(t *testing.T) {
+	useLogDir(t)
+	history, err := newHistory("game")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer history.Close()
+
+	stuck := newStuckClient()
+	defer stuck.Close()
+	go history.WriteTo(stuck)
+	select {
+	case <-stuck.writing:
+	case <-time.After(5 * time.Second):
+		t.Fatal("replay never reached the stuck client")
+	}
+
+	written := make(chan error, 1)
+	go func() {
+		_, err := history.Write([]byte("hello\n"))
+		written <- err
+	}()
+	select {
+	case err := <-written:
+		if err != nil {
+			t.Error(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("a client that isn't reading blocked writing to the log")
+	}
 }

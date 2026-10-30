@@ -12,7 +12,7 @@ fixed during review, showed up as soon as a test sent game output to
 clients. Each needs a specific interleaving of goroutines, or of a REST
 request and a Telnet login.
 
-- [ ] **`logFile.Reopen` swaps the open file while `sendDownstream` may be
+- [x] **`logFile.Reopen` swaps the open file while `sendDownstream` may be
       writing to it** (`cmd/serve/session.go`). `ReopenHistories` (SIGHUP)
       calls `Reopen`, which closes and replaces `logFile.File`, while the
       upstream's read loop may be writing through the same `logFile`.

@@ -57,7 +57,7 @@ Phase 2: Standalone bugs
 - [x] 6. `allow clearing an upstream's connect script`
 
 Phase 3: Log file
-- [ ] 7. `guard logFile with a lock`
+- [x] 7. `guard logFile with a lock`
 
 Phase 4: Session races
 - [ ] 8. `read the session name from the database on rename`

@@ -725,69 +725,105 @@ func newHistory(key string) (History, error) {
 }
 
 type logFile struct {
-	*os.File
+	// mu guards the fields below. It is never held while writing to a client,
+	// so one that isn't reading can't block logging.
+	mu          sync.Mutex
+	file        *os.File
 	key         string
 	historySize int64
 }
 
-func (f *logFile) Open() (err error) {
+func (f *logFile) Open() error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.open()
+}
+
+func (f *logFile) open() (err error) {
 	logFileName := path.Join(
 		viper.GetString("log.dir"),
 		fmt.Sprintf("%s-%s.log", time.Now().Format("2006-01-02"), f.key),
 	)
-	f.File, err = os.OpenFile(
+	f.file, err = os.OpenFile(
 		logFileName,
 		os.O_APPEND|os.O_CREATE|os.O_WRONLY,
 		0644,
 	)
 	if err == nil {
 		t := time.Now()
-		fmt.Fprintf(f, logSeperator, "opened", t.Format(logTimeFormat))
+		fmt.Fprintf(f.file, logSeperator, "opened", t.Format(logTimeFormat))
 	}
 	return
 }
 
-func (f *logFile) Close() (err error) {
+func (f *logFile) Close() error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.close()
+}
+
+func (f *logFile) close() error {
 	t := time.Now()
-	fmt.Fprintf(f, logSeperator, "closed", t.Format(logTimeFormat))
-	return f.File.Close()
+	fmt.Fprintf(f.file, logSeperator, "closed", t.Format(logTimeFormat))
+	return f.file.Close()
 }
 
 func (f *logFile) Reopen(name string) (err error) {
-	if err = f.Close(); err != nil {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err = f.close(); err != nil {
 		return
 	}
 	f.key = name
-	return f.Open()
+	return f.open()
+}
+
+func (f *logFile) Write(p []byte) (int, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.file.Write(p)
 }
 
 func (f *logFile) WriteTo(w io.Writer) (int64, error) {
-	if f.File == nil {
-		return 0, errors.New("log file not open")
-	}
-	file, err := os.Open(f.Name())
+	buf, err := f.readHistory()
 	if err != nil {
 		return 0, err
+	}
+	n, err := w.Write(buf)
+	return int64(n), err
+}
+
+// readHistory returns what to replay to a client: the end of the log, starting
+// after the last time it was opened.
+func (f *logFile) readHistory() ([]byte, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.file == nil {
+		return nil, errors.New("log file not open")
+	}
+	file, err := os.Open(f.file.Name())
+	if err != nil {
+		return nil, err
 	}
 	defer file.Close()
 	end, err := file.Seek(0, io.SeekEnd)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 	_, err = file.Seek(0, io.SeekStart)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 	if end > f.historySize {
 		_, err = file.Seek(end-f.historySize, io.SeekCurrent)
 		if err != nil {
-			return 0, err
+			return nil, err
 		}
 	}
 	buf := make([]byte, f.historySize)
 	n, err := file.Read(buf)
 	if err != nil && err != io.EOF {
-		return 0, err
+		return nil, err
 	}
 	buf = buf[:n]
 	if n = bytes.LastIndex(buf, []byte(logSepOpened)); n > 0 {
@@ -795,6 +831,5 @@ func (f *logFile) WriteTo(w io.Writer) (int64, error) {
 		n = bytes.IndexByte(buf, '\n')
 		buf = buf[n+1:]
 	}
-	n, err = w.Write(buf)
-	return int64(n), err
+	return buf, nil
 }
