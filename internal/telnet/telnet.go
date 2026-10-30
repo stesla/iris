@@ -230,10 +230,13 @@ func (r *reader) Read(p []byte) (n int, err error) {
 				r.sbdata = append(r.sbdata, IAC)
 				r.ds = decodeSB
 			case SE:
-				dispatch(r.ctx, event.Event{Name: EventSubnegotiation, Data: Subnegotiation{
-					Opt:  r.sbdata[0],
-					Data: r.sbdata[1:],
-				}})
+				// a subnegotiation with no option byte means nothing, so ignore it
+				if len(r.sbdata) > 0 {
+					dispatch(r.ctx, event.Event{Name: EventSubnegotiation, Data: Subnegotiation{
+						Opt:  r.sbdata[0],
+						Data: r.sbdata[1:],
+					}})
+				}
 				r.ds = decodeByte
 			}
 		}

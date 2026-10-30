@@ -221,6 +221,31 @@ func TestCharsetSubnegotiation(t *testing.T) {
 				require.Nil(t, charset.requestedEncodings)
 			},
 		},
+		{
+			data: []byte{},
+		},
+		{
+			init: func() {
+				charset.RequestEncoding(unicoding.UTF8)
+			},
+			data:  append([]byte{CharsetAccepted}, "BOGUS"...),
+			event: event.Event{Name: EventCharsetRejected},
+			assert: func() {
+				require.False(t, charset.Waiting())
+				require.Nil(t, charset.enc)
+			},
+		},
+		{
+			init: func() {
+				charset.RequestEncoding(unicoding.UTF8)
+			},
+			data:  []byte{CharsetAccepted},
+			event: event.Event{Name: EventCharsetRejected},
+			assert: func() {
+				require.False(t, charset.Waiting())
+				require.Nil(t, charset.enc)
+			},
+		},
 	}
 
 	for i, test := range tests {

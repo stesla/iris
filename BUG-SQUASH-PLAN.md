@@ -47,7 +47,7 @@ from here with no other context.
 ## Checklist
 
 Phase 1: Crash
-- [ ] 1. `fix panic on short telnet subnegotiation` (not in TODO)
+- [x] 1. `fix panic on short telnet subnegotiation` (not in TODO)
 
 Phase 2: Standalone bugs
 - [ ] 2. `make log.level take effect`
@@ -94,6 +94,7 @@ All of these were reproduced at `4a85735` unless marked otherwise.
 | Problem | How to reproduce | Commit |
 |---|---|---|
 | A client can panic the server before logging in. | Send `IAC SB IAC SE` before the login: panics at `internal/telnet/telnet.go:235`. Or send `IAC DO CHARSET IAC SB CHARSET IAC SE`: panics at `internal/telnet/encoding.go:146`. Both reproduce in-process through `connectUpstream`. Nothing recovers in the goroutine at `cmd/serve/serve.go:140`, so this should kill the whole server (not run against a live server). | 1 |
+| A client can panic the server with an unknown charset name. | Send `IAC DO CHARSET IAC DO TRANSMIT-BINARY IAC WILL TRANSMIT-BINARY IAC SB CHARSET ACCEPTED BOGUS IAC SE` before the login: `getEncoding` returns nil, and `setEncoding` passes it on to a nil pointer panic at `internal/telnet/telnet.go:134`. Found after this plan was written, at `40b9901`. | 1 |
 | Telnet writes aren't goroutine-safe. | Call `d.upstream.Write` from two goroutines: `-race` reports it inside the encoder, reached from `internal/telnet/telnet.go:147`. | 14 |
 | Replay is corrupted even after charset is accepted. | Put `caf\xc3\xa9` in the history, have a joining client answer `DO CHARSET` and `CHARSET ACCEPTED UTF-8` but not Transmit Binary. It receives `caf\x1a`. | 15 |
 | A client that answers charset before logging in gets no history. | Send `IAC DONT CHARSET IAC WONT CHARSET` followed by the login in one write. The listener isn't registered until `cmd/serve/session.go:398`, so it misses the event. | 15 |
@@ -126,13 +127,16 @@ All of these were reproduced at `4a85735` unless marked otherwise.
 - `internal/telnet/telnet.go:232-236`: ignore a subnegotiation with no option
   byte.
 - `internal/telnet/encoding.go:146`: ignore one with no command byte.
+- `internal/telnet/encoding.go:149`: treat `CHARSET ACCEPTED` with an unknown or
+  empty name as a rejection, so a nil encoding never reaches `setEncoding`.
 
 **Tests**
 - `telnet_test.go`: `IAC SB IAC SE` causes no panic and dispatches no event, and
   following bytes still read normally.
-- `encoding_test.go`: an empty `CHARSET` subnegotiation with the option enabled.
-- `session_test.go`: both sequences sent before a valid login, and the login
-  still succeeds.
+- `encoding_test.go`: an empty `CHARSET` subnegotiation with the option enabled,
+  and `CHARSET ACCEPTED` with an unknown or empty name.
+- `session_test.go`: all of these sequences sent before a valid login, and the
+  login still succeeds.
 
 ## Phase 2: Standalone bugs
 

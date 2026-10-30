@@ -145,6 +145,8 @@ func TestReadCommand(t *testing.T) {
 		{[]byte{'e', IAC, WONT, Echo, 'e'}, []byte("ee"), Negotiation{Cmd: WONT, Opt: Echo}},
 		{[]byte{'f', IAC, SB, Echo, 'f', 'o', 'o', IAC, SE, 'f'}, []byte("ff"), Subnegotiation{Opt: Echo, Data: []byte("foo")}},
 		{[]byte{'g', IAC, SB, Echo, IAC, IAC, IAC, SE, 'g'}, []byte("gg"), Subnegotiation{Opt: Echo, Data: []byte{IAC}}},
+		{[]byte{'h', IAC, SB, IAC, SE, 'h'}, []byte("hh"), nil},
+		{[]byte{'i', IAC, SB, Echo, IAC, SE, 'i'}, []byte("ii"), Subnegotiation{Opt: Echo, Data: []byte{}}},
 	}
 	for _, test := range tests {
 		var capturedEvent any

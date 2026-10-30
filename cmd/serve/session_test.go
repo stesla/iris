@@ -22,6 +22,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/stesla/iris/internal/secret"
+	"github.com/stesla/iris/internal/telnet"
 )
 
 // testUpstreamPassword is the password of the "game" upstream in newTestPool.
@@ -449,6 +450,41 @@ func TestLoginConnectsNewUpstream(t *testing.T) {
 	p.RUnlock()
 	if u == nil || !u.IsConnected() {
 		t.Error("upstream is not connected")
+	}
+}
+
+func TestLoginAfterMalformedSubnegotiation(t *testing.T) {
+	const (
+		iac = telnet.IAC
+		sb  = telnet.SB
+		se  = telnet.SE
+		cs  = telnet.Charset
+		tb  = telnet.TransmitBinary
+	)
+	enableCharset := []byte{iac, telnet.DO, cs}
+	enableBinary := []byte{iac, telnet.DO, tb, iac, telnet.WILL, tb}
+	tests := []struct {
+		name  string
+		parts [][]byte
+	}{
+		{"no option", [][]byte{{iac, sb, iac, se}}},
+		{"no charset command", [][]byte{enableCharset, {iac, sb, cs, iac, se}}},
+		{"unknown charset accepted", [][]byte{enableCharset, enableBinary,
+			{iac, sb, cs, telnet.CharsetAccepted, 'B', 'O', 'G', 'U', 'S', iac, se}}},
+		{"empty charset accepted", [][]byte{enableCharset, enableBinary,
+			{iac, sb, cs, telnet.CharsetAccepted, iac, se}}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			addr, lines := listenUpstream(t)
+			p := newTestPool(t, addr)
+
+			msg := string(bytes.Join(test.parts, nil)) + loginMsg("game", testIrisPassword)
+			if _, err := login(t, p, msg); err != nil {
+				t.Fatal(err)
+			}
+			waitForLine(t, lines, "connect me")
+		})
 	}
 }
 

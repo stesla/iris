@@ -142,11 +142,18 @@ func (h *CharsetHandler) Listen(ctx context.Context, ev event.Event) error {
 	case Subnegotiation:
 		switch t.Opt {
 		case Charset:
-			if getOption(ctx, Charset).EnabledForUs() {
+			// a subnegotiation with no command byte means nothing, so ignore it
+			if getOption(ctx, Charset).EnabledForUs() && len(t.Data) > 0 {
 				switch cmd, data := t.Data[0], t.Data[1:]; cmd {
 				case CharsetAccepted:
 					h.requestedEncodings = nil
 					enc := h.getEncoding(data)
+					if enc == nil {
+						// we can't use a charset we don't recognize, which
+						// leaves the same result as the peer rejecting ours
+						dispatch(ctx, event.Event{Name: EventCharsetRejected})
+						break
+					}
 					dispatch(ctx, event.Event{Name: EventCharsetAccepted, Data: CharsetData{Encoding: enc}})
 				case CharsetRejected:
 					h.requestedEncodings = nil
