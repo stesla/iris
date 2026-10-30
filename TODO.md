@@ -49,6 +49,11 @@ request and a Telnet login.
     the log file use `y` until the next rename.
   - Having `renameUpstream` read the current name from the database, instead
     of taking it from the caller, would fix this and the race above.
+- [ ] **`GET /sessions` can list a closed upstream.** `upstream.info`
+      (`cmd/serve/session.go`) reports an upstream as connected without checking
+      `closed`, so it stays listed from when it closes until it leaves the pool.
+      Found by reading the code, not reproduced. Having `info` check `closed`, as
+      `IsConnected` does, would fix it.
 
 ## Bugs
 
@@ -107,6 +112,75 @@ request and a Telnet login.
       so for example `delete` accepts `-a` and ignores it. Register each
       flag only on the subcommands that use it, so a wrong flag is an
       error.
+- [ ] **A failed `logFile.Reopen` disconnects the upstream**
+      (`cmd/serve/session.go`). `ReopenHistories` closes the upstream if
+      `Reopen` fails, for example on a full disk or a bad `log.dir`. One SIGHUP
+      can then drop every game connection and every attached client.
+  - Reproduced by pointing `log.dir` at a missing directory before calling
+    `ReopenHistories`: the upstream left the pool and its connection closed.
+  - `Reopen` closes the old file before opening the new one. Opening the new
+    one first would let a failure keep logging to the old file instead.
+- [ ] **Try a real SIGHUP against a running server.** The tests call
+      `ReopenHistories` directly, so the signal handler in `runTelnetProxy`
+      (`cmd/serve/serve.go`) has only been read, not run. Check by hand, from a
+      temp directory with its own config and database, that a connected
+      upstream keeps logging after the signal.
+- [ ] **Test that `Connect` closes the history when attaching it is refused**
+      (`cmd/serve/session.go`). No test in the repo reaches this path, because
+      the upstream has to close in the small window before `AddDownstream`, so a
+      regression wouldn't be caught.
+  - It was checked once on a temporary copy of the code, with a 100ms delay added
+    before the attach and a delete landing during it: the history closed, and
+    removing `history.Close()` failed the check.
+  - A test in the repo needs a way to close the upstream at that exact moment,
+    such as a variable that tests can replace, like `dial`.
+- [ ] **A delete just after the first client attaches gives it no reason.**
+      `connectNewUpstream` (`cmd/serve/session.go`) attaches the client before
+      sending the connect script. If `closeUpstream` runs in between, it closes
+      the client, so `writeLoginError` can't tell it why. Found by reading the
+      code, not reproduced. The window is tiny, and it only costs the message.
+- [ ] **A failed connect script write leaves the upstream connected.**
+      `connectNewUpstream` (`cmd/serve/session.go`) returns the error while the
+      upstream is still open, and `removeUnconnected` leaves a connected upstream
+      alone. It stays in the pool without having logged in to the game, and later
+      clients join it. Found by reading the code, not reproduced. Closing the
+      upstream when the write fails would fix it.
+- [ ] **A stuck write holds up everything behind `writeMu`**
+      (`internal/telnet/telnet.go`). Found by reading the code, not reproduced.
+      Closing the connection clears both of these.
+  - If the game stops reading, every client's writes to it wait in line behind
+    the blocked one. Writes to the game could already block, so this mostly
+    changes who waits.
+  - If a client stops reading, an encoding change on that connection waits for
+    the lock, which blocks the client's read goroutine.
+  - Write deadlines would limit how long either can last.
+- [ ] **A game that doesn't agree a charset can't send or receive non-ASCII
+      text.** The upstream connection stays 7-bit ASCII for as long as it's open,
+      whether the game stays silent or refuses.
+  - Reproduced with a fake game that never answers and a client that had
+    negotiated UTF-8: the game's `caf\xc3\xa9` reached the client and the log as
+    `caf` and two U+FFFD characters, and the client's `caf\xc3\xa9` reached the
+    game as `caf\x1a`.
+  - The damage to the log is permanent, so replays repeat it.
+  - `always_allow_charset` doesn't help, because it only applies once a charset
+    has been agreed. A per-upstream setting that forces an encoding would be the
+    natural fix.
+- [ ] **A joining client that doesn't answer `WILL CHARSET` waits 5 seconds.**
+      Seen with `tt++` on its default configuration: history and live game output
+      are held for the full `negotiationTimeout` on each join (5.14s measured),
+      then sent as ASCII. Consider whether the timeout should be shorter or
+      configurable.
+- [ ] **The replay buffer has no size limit** (`downstream.Write` in
+      `cmd/serve/session.go`). A very busy game could grow it for up to
+      `negotiationTimeout` while a client negotiates. Found by reading the code,
+      not reproduced.
+- [ ] **Test that `flushReplay` exits after a client disconnects**
+      (`cmd/serve/session.go`). `TestClientDisconnectsDuringReplayWait` checks that
+      the client gets dropped, but not that the goroutine ends. From reading the
+      code, it stays until the timeout and then exits when its write fails.
+- [ ] **Test a failed history read during a join** (`joinUpstream` in
+      `cmd/serve/session.go`). The error is logged and the client joins without
+      history, but no test covers this.
 
 ## Security
 
@@ -119,6 +193,17 @@ request and a Telnet login.
     with no cap on how many.
 - [ ] **`-p PASSWORD` leaves the upstream password in shell history.**
       `-p -` avoids it. Consider warning when a literal password is given.
+- [ ] **Recover from panics in connection goroutines.** Nothing calls
+      `recover()`, so a panic on one connection stops the whole server, along
+      with every client and game connection. The Telnet parser runs before the
+      password check, so a bad input bug can be reached without logging in.
+  - Add a `recover()` that logs the panic and stack in the two goroutines
+    that read from the network: the client one in `runTelnetProxy`
+    (`cmd/serve/serve.go`) and `upstream.runForever` (`cmd/serve/session.go`).
+    Their existing deferred cleanup already closes the connection.
+  - The REST API doesn't need one, because `net/http` recovers panics in
+    handlers.
+  - This limits the damage from a panic, and doesn't replace fixing its cause.
 
 ## Decisions to make
 
@@ -164,3 +249,7 @@ request and a Telnet login.
   uses `O_EXCL`, so the second server fails with "file exists" rather than
   overwriting the key. That fails loudly, and two servers on one database is
   already a misconfiguration.
+- **Taking `writeMu` for Telnet commands.** Option negotiation, Go-Ahead and
+  End-of-Record write straight to the connection (`internal/telnet/telnet.go`),
+  so one can land between the chunks of a long `Write`. Each is a single write,
+  and Telnet allows commands in the middle of the data, so this is safe.
