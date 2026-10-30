@@ -60,6 +60,11 @@ type SessionPool struct {
 	db      *sql.DB
 	box     *secret.Box
 	logger  zerolog.Logger
+
+	// syncMu makes syncUpstream calls run one at a time, so that one which read
+	// an older name can't overwrite a newer one. It isn't the pool lock, which
+	// is held on paths that shouldn't wait on a database query.
+	syncMu sync.Mutex
 }
 
 func NewSessionPool(db *sql.DB, box *secret.Box, logger zerolog.Logger) *SessionPool {
@@ -126,10 +131,21 @@ func (p *SessionPool) upstreamFor(id int64, name string) *upstream {
 	return p.streams[id]
 }
 
-// renameUpstream updates the name of the live upstream with the given id, if
-// there is one. Its log file follows the new name the next time histories are
-// reopened.
-func (p *SessionPool) renameUpstream(id int64, name string) {
+// syncUpstream updates the live upstream with the given id, if there is one, to
+// the name in its database row. Its log file follows the new name the next time
+// histories are reopened.
+//
+// Call it after committing a change to the row. Every commit is followed by a
+// sync and syncs run one at a time, so the last one sees the latest commit.
+func (p *SessionPool) syncUpstream(ctx context.Context, id int64) error {
+	p.syncMu.Lock()
+	defer p.syncMu.Unlock()
+
+	var name string
+	if err := p.db.QueryRowContext(ctx, "SELECT name FROM upstreams WHERE id=?", id).Scan(&name); err != nil {
+		return err
+	}
+
 	p.RLock()
 	u, found := p.streams[id]
 	p.RUnlock()
@@ -138,6 +154,7 @@ func (p *SessionPool) renameUpstream(id int64, name string) {
 		u.name = name
 		u.state.Unlock()
 	}
+	return nil
 }
 
 // removeUnconnected removes u from the pool if it is still there and never

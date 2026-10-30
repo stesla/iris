@@ -5,10 +5,12 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -601,5 +603,48 @@ func TestMethodNotAllowed(t *testing.T) {
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusMethodNotAllowed {
 		t.Errorf("status %d", resp.StatusCode)
+	}
+}
+
+func TestConcurrentRenamesMatchDatabase(t *testing.T) {
+	c, srv, _ := newTestAPI(t)
+	ctx := context.Background()
+	addTestUpstream(t, c, "n0", "secret")
+	addConnected(t, srv.sessions, "n0")
+
+	// rename retries until from exists, so the commits land in order
+	rename := func(from, to string) {
+		for {
+			err := c.EditUpstream(ctx, from, &api.EditUpstreamRequest{NewName: &to})
+			var apiErr *api.Error
+			if errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusNotFound {
+				continue
+			}
+			if err != nil {
+				t.Errorf("%s to %s: %v", from, to, err)
+			}
+			return
+		}
+	}
+
+	for round := range 30 {
+		a, b, last := fmt.Sprintf("n%d", 2*round), fmt.Sprintf("n%d", 2*round+1), fmt.Sprintf("n%d", 2*round+2)
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() { defer wg.Done(); rename(a, b) }()
+		go func() { defer wg.Done(); rename(b, last) }()
+		wg.Wait()
+
+		var stored string
+		if err := srv.db.QueryRow("SELECT name FROM upstreams").Scan(&stored); err != nil {
+			t.Fatal(err)
+		}
+		sessions, err := c.ListSessions(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(sessions) != 1 || sessions[0].UpstreamName != stored {
+			t.Fatalf("round %d: database says %q, sessions say %+v", round, stored, sessions)
+		}
 	}
 }

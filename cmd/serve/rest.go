@@ -242,7 +242,11 @@ func (s *apiServer) editUpstream(ctx context.Context, name string, r *api.EditUp
 		return err
 	}
 	if r.NewName != nil {
-		s.sessions.renameUpstream(id, *r.NewName)
+		// the rename is committed, so a client hanging up mustn't leave the
+		// session with a stale name, and a failure here isn't the client's
+		if err := s.sessions.syncUpstream(context.WithoutCancel(ctx), id); err != nil {
+			logger.Error().Err(err).Int64("upstream", id).Msg("error syncing upstream")
+		}
 	}
 	return nil
 }

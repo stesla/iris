@@ -647,7 +647,9 @@ func TestLoginAfterRenameJoinsSameSession(t *testing.T) {
 	if _, err := p.db.Exec("UPDATE upstreams SET name='renamed' WHERE name='game'"); err != nil {
 		t.Fatal(err)
 	}
-	p.renameUpstream(u.id, "renamed")
+	if err := p.syncUpstream(context.Background(), u.id); err != nil {
+		t.Fatal(err)
+	}
 
 	d, err := login(t, p, loginMsg("renamed", testIrisPassword))
 	if err != nil {
@@ -988,7 +990,12 @@ func TestReopenHistoriesUsesNewName(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	p.renameUpstream(id, "renamed")
+	if _, err := p.db.Exec("UPDATE upstreams SET name='renamed' WHERE id=?", id); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.syncUpstream(context.Background(), id); err != nil {
+		t.Fatal(err)
+	}
 	p.ReopenHistories()
 	if _, err := os.Stat(filepath.Join(dir, date+"-renamed.log")); err != nil {
 		t.Errorf("log under new name: %v", err)
@@ -1200,5 +1207,127 @@ func TestLogFileReplayToStuckClientDoesNotBlockWrite(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("a client that isn't reading blocked writing to the log")
+	}
+}
+
+func TestSyncUpstreamUsesLatestCommit(t *testing.T) {
+	p := newTestPool(t, "unused:1")
+	u := addConnected(t, p, "game")
+	for _, name := range []string{"y", "z"} {
+		if _, err := p.db.Exec("UPDATE upstreams SET name=? WHERE id=?", name, u.id); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	var wg sync.WaitGroup
+	for range 20 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := p.syncUpstream(context.Background(), u.id); err != nil {
+				t.Error(err)
+			}
+		}()
+	}
+	wg.Wait()
+
+	if name, _, _ := u.info(); name != "z" {
+		t.Errorf("name = %q", name)
+	}
+}
+
+func TestSyncUpstreamDuringCommits(t *testing.T) {
+	p := newTestPool(t, "unused:1")
+	u := addConnected(t, p, "game")
+
+	var wg sync.WaitGroup
+	for w := range 4 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range 20 {
+				name := fmt.Sprintf("w%d-%d", w, i)
+				if _, err := p.db.Exec("UPDATE upstreams SET name=? WHERE id=?", name, u.id); err != nil {
+					t.Error(err)
+					return
+				}
+				if err := p.syncUpstream(context.Background(), u.id); err != nil {
+					t.Error(err)
+					return
+				}
+			}
+		}()
+	}
+	wg.Wait()
+
+	var stored string
+	if err := p.db.QueryRow("SELECT name FROM upstreams WHERE id=?", u.id).Scan(&stored); err != nil {
+		t.Fatal(err)
+	}
+	if name, _, _ := u.info(); name != stored {
+		t.Errorf("database says %q, session says %q", stored, name)
+	}
+}
+
+// TestSyncUpstreamRunsOneAtATime checks the lock that keeps a slow sync, which
+// read an older name, from overwriting a newer one.
+func TestSyncUpstreamRunsOneAtATime(t *testing.T) {
+	p := newTestPool(t, "unused:1")
+	u := addConnected(t, p, "game")
+	if _, err := p.db.Exec("UPDATE upstreams SET name='renamed' WHERE id=?", u.id); err != nil {
+		t.Fatal(err)
+	}
+
+	p.syncMu.Lock()
+	done := make(chan error, 1)
+	go func() { done <- p.syncUpstream(context.Background(), u.id) }()
+	select {
+	case <-done:
+		p.syncMu.Unlock()
+		t.Fatal("sync ran while another held the lock")
+	case <-time.After(50 * time.Millisecond):
+	}
+	if name, _, _ := u.info(); name != "game" {
+		t.Errorf("name changed to %q while another sync held the lock", name)
+	}
+	p.syncMu.Unlock()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("sync never finished")
+	}
+	if name, _, _ := u.info(); name != "renamed" {
+		t.Errorf("name = %q", name)
+	}
+}
+
+func TestSyncUpstreamNoSession(t *testing.T) {
+	p := newTestPool(t, "unused:1")
+	if err := p.syncUpstream(context.Background(), upstreamID(t, p.db, "game")); err != nil {
+		t.Error(err)
+	}
+	if poolSize(p) != 0 {
+		t.Errorf("pool size = %d", poolSize(p))
+	}
+}
+
+func TestSyncUpstreamQueryFailureKeepsName(t *testing.T) {
+	p := newTestPool(t, "unused:1")
+	u := addConnected(t, p, "game")
+	if _, err := p.db.Exec("UPDATE upstreams SET name='renamed' WHERE id=?", u.id); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := p.syncUpstream(ctx, u.id); !errors.Is(err, context.Canceled) {
+		t.Errorf("got %v", err)
+	}
+	if name, _, _ := u.info(); name != "game" {
+		t.Errorf("name = %q", name)
 	}
 }

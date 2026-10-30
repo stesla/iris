@@ -40,7 +40,7 @@ request and a Telnet login.
   - Have `upstreamFor` take the name from the row once in the pool, or have
     `loadUpstream` and `upstreamFor` run under one lock with
     `renameUpstream`.
-- [ ] **Two REST renames of the same upstream can race.**
+- [x] **Two REST renames of the same upstream can race.**
   - Sequence: request A renames `x` to `y` and request B renames `y` to `z`.
     The commits are ordered A then B, but `editUpstream`
     (`cmd/serve/rest.go`) calls `renameUpstream` after the commit and
@@ -119,7 +119,7 @@ request and a Telnet login.
 - [ ] **Reopen the log on rename.** A renamed upstream's history log keeps
       its old file name until the next SIGHUP. Should a rename reopen the
       log right away? That needs the `logFile` lock from "Races" first, and
-      then `renameUpstream` can call `Reopen` directly.
+      then `syncUpstream` can call `Reopen` directly.
 - [ ] **Require the Basic auth username to be `iris`.** `requireAuth`
       (`cmd/serve/rest.go`) ignores the username today, so
       `curl -u anything:password` works. Once multiple users exist and
