@@ -24,51 +24,57 @@ func (e *Error) Error() string {
 	return e.Message
 }
 
+// DefaultUsername is sent as the basic auth username. The server ignores it
+// until Iris supports multiple users.
+const DefaultUsername = "iris"
+
 type Client struct {
-	BaseURL string
-	HTTP    *http.Client
+	BaseURL  string
+	HTTP     *http.Client
+	Username string
+	Password string
 }
 
-func NewClient(baseURL string) *Client {
+// NewClient returns a client that authenticates every request with the Iris
+// password.
+func NewClient(baseURL, password string) *Client {
 	return &Client{
-		BaseURL: strings.TrimRight(baseURL, "/"),
-		HTTP:    http.DefaultClient,
+		BaseURL:  strings.TrimRight(baseURL, "/"),
+		HTTP:     http.DefaultClient,
+		Username: DefaultUsername,
+		Password: password,
 	}
 }
 
 func (c *Client) ListSessions(ctx context.Context) ([]Session, error) {
 	var resp ListSessionsResponse
-	err := c.do(ctx, http.MethodGet, "/sessions", nil, nil, &resp)
+	err := c.do(ctx, http.MethodGet, "/sessions", nil, &resp)
 	return resp.Sessions, err
 }
 
 func (c *Client) ListUpstreams(ctx context.Context) ([]Upstream, error) {
 	var resp ListUpstreamsResponse
-	err := c.do(ctx, http.MethodGet, "/upstreams", nil, nil, &resp)
+	err := c.do(ctx, http.MethodGet, "/upstreams", nil, &resp)
 	return resp.Upstreams, err
 }
 
 func (c *Client) AddUpstream(ctx context.Context, r *AddUpstreamRequest) error {
-	return c.do(ctx, http.MethodPost, "/upstreams", nil, r, nil)
+	return c.do(ctx, http.MethodPost, "/upstreams", r, nil)
 }
 
-func (c *Client) EditUpstream(ctx context.Context, name, password string, r *EditUpstreamRequest) error {
-	return c.do(ctx, http.MethodPatch, upstreamPath(name), &auth{name, password}, r, nil)
+func (c *Client) EditUpstream(ctx context.Context, name string, r *EditUpstreamRequest) error {
+	return c.do(ctx, http.MethodPatch, upstreamPath(name), r, nil)
 }
 
-func (c *Client) DeleteUpstream(ctx context.Context, name, password string) error {
-	return c.do(ctx, http.MethodDelete, upstreamPath(name), &auth{name, password}, nil, nil)
+func (c *Client) DeleteUpstream(ctx context.Context, name string) error {
+	return c.do(ctx, http.MethodDelete, upstreamPath(name), nil, nil)
 }
 
 func upstreamPath(name string) string {
 	return "/upstreams/" + url.PathEscape(name)
 }
 
-type auth struct {
-	name, password string
-}
-
-func (c *Client) do(ctx context.Context, method, path string, a *auth, in, out any) error {
+func (c *Client) do(ctx context.Context, method, path string, in, out any) error {
 	var body io.Reader
 	if in != nil {
 		b, err := json.Marshal(in)
@@ -86,9 +92,7 @@ func (c *Client) do(ctx context.Context, method, path string, a *auth, in, out a
 		req.Header.Set("Content-Type", "application/json")
 	}
 	req.Header.Set("Accept", "application/json")
-	if a != nil {
-		req.SetBasicAuth(a.name, a.password)
-	}
+	req.SetBasicAuth(c.Username, c.Password)
 
 	resp, err := c.HTTP.Do(req)
 	if err != nil {

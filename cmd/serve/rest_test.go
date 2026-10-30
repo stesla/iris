@@ -1,6 +1,7 @@
 package serve
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"errors"
@@ -16,20 +17,51 @@ import (
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/stesla/iris/api"
+	"github.com/stesla/iris/internal/secret"
 )
 
 const testSchema = `CREATE TABLE upstreams (
-	name     TEXT PRIMARY KEY,
+	id       INTEGER PRIMARY KEY AUTOINCREMENT,
+	name     TEXT NOT NULL UNIQUE,
 	address  TEXT NOT NULL,
 	login    TEXT NOT NULL,
-	bcrypt   TEXT NOT NULL,
+	password BLOB,
 	script   TEXT
+);
+CREATE TABLE iris_auth (
+	id     INTEGER PRIMARY KEY CHECK (id = 1),
+	bcrypt TEXT NOT NULL
 )`
 
-func newTestAPI(t *testing.T) (*api.Client, *apiServer, *httptest.Server) {
-	t.Helper()
-	logger = zerolog.Nop()
+const testIrisPassword = "iris-secret"
 
+// authTransport adds basic auth to every request, for tests that don't use
+// api.Client.
+type authTransport struct {
+	username, password string
+}
+
+func (t *authTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	r = r.Clone(r.Context())
+	r.SetBasicAuth(t.username, t.password)
+	return http.DefaultTransport.RoundTrip(r)
+}
+
+var authClient = &http.Client{Transport: &authTransport{"iris", testIrisPassword}}
+
+func newTestBox(t *testing.T) *secret.Box {
+	t.Helper()
+	box, err := secret.NewBox(bytes.Repeat([]byte{7}, secret.KeySize))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return box
+}
+
+// newTestDB returns a database with the current schema and the Iris password
+// set to testIrisPassword.
+func newTestDB(t *testing.T) *sql.DB {
+	t.Helper()
 	db, err := sql.Open("sqlite3", filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -38,11 +70,28 @@ func newTestAPI(t *testing.T) (*api.Client, *apiServer, *httptest.Server) {
 	if _, err := db.Exec(testSchema); err != nil {
 		t.Fatal(err)
 	}
+	// MinCost rather than auth.SetPassword's DefaultCost, since every request
+	// and login checks it
+	hash, err := bcrypt.GenerateFromPassword([]byte(testIrisPassword), bcrypt.MinCost)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec("INSERT INTO iris_auth (id, bcrypt) VALUES (1, ?)", hash); err != nil {
+		t.Fatal(err)
+	}
+	return db
+}
 
-	srv := &apiServer{db: db, sessions: NewSessionPool(db, logger)}
+func newTestAPI(t *testing.T) (*api.Client, *apiServer, *httptest.Server) {
+	t.Helper()
+	logger = zerolog.Nop()
+
+	db := newTestDB(t)
+	box := newTestBox(t)
+	srv := &apiServer{db: db, sessions: NewSessionPool(db, box, logger), box: box}
 	ts := httptest.NewServer(srv.handler())
 	t.Cleanup(ts.Close)
-	return api.NewClient(ts.URL), srv, ts
+	return api.NewClient(ts.URL, testIrisPassword), srv, ts
 }
 
 func addTestUpstream(t *testing.T, c *api.Client, name, password string) {
@@ -53,6 +102,22 @@ func addTestUpstream(t *testing.T, c *api.Client, name, password string) {
 	if err != nil {
 		t.Fatal(err)
 	}
+}
+
+// storedPassword returns the decrypted password of the named upstream.
+func storedPassword(t *testing.T, srv *apiServer, name string) string {
+	t.Helper()
+	var id int64
+	var sealed []byte
+	err := srv.db.QueryRow("SELECT id, password FROM upstreams WHERE name=?", name).Scan(&id, &sealed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plaintext, err := srv.box.Open(id, sealed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(plaintext)
 }
 
 func wantStatus(t *testing.T, err error, status int) {
@@ -66,9 +131,81 @@ func wantStatus(t *testing.T, err error, status int) {
 	}
 }
 
+func TestRequiresIrisPassword(t *testing.T) {
+	c, _, ts := newTestAPI(t)
+	addTestUpstream(t, c, "foo", "secret")
+
+	for _, tc := range []struct {
+		method, path, body string
+	}{
+		{http.MethodGet, "/sessions", ""},
+		{http.MethodGet, "/upstreams", ""},
+		{http.MethodPost, "/upstreams", `{"name":"bar","address":"x:1","login":"l","password":"p"}`},
+		{http.MethodPatch, "/upstreams/foo", `{"login":"x"}`},
+		{http.MethodDelete, "/upstreams/foo", ""},
+		{http.MethodPut, "/upstreams", ""},
+	} {
+		for _, creds := range []*authTransport{
+			nil,
+			{"iris", "wrong"},
+			{"iris", ""},
+			// the upstream's own password no longer works
+			{"foo", "secret"},
+		} {
+			req, _ := http.NewRequest(tc.method, ts.URL+tc.path, strings.NewReader(tc.body))
+			if creds != nil {
+				req.SetBasicAuth(creds.username, creds.password)
+			}
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			resp.Body.Close()
+			if resp.StatusCode != http.StatusUnauthorized || resp.Header.Get("WWW-Authenticate") == "" {
+				t.Errorf("%s %s with %+v: status %d, WWW-Authenticate %q",
+					tc.method, tc.path, creds, resp.StatusCode, resp.Header.Get("WWW-Authenticate"))
+			}
+		}
+	}
+
+	// nothing was changed by the rejected requests
+	upstreams, err := c.ListUpstreams(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(upstreams) != 1 || upstreams[0].Login != "login-foo" {
+		t.Errorf("got %+v", upstreams)
+	}
+}
+
+func TestIrisPasswordIgnoresUsername(t *testing.T) {
+	_, _, ts := newTestAPI(t)
+	for _, username := range []string{"iris", "", "anyone"} {
+		req, _ := http.NewRequest(http.MethodGet, ts.URL+"/upstreams", nil)
+		req.SetBasicAuth(username, testIrisPassword)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("username %q: status %d", username, resp.StatusCode)
+		}
+	}
+}
+
+func TestIrisPasswordNotSet(t *testing.T) {
+	c, srv, _ := newTestAPI(t)
+	if _, err := srv.db.Exec("DELETE FROM iris_auth"); err != nil {
+		t.Fatal(err)
+	}
+	_, err := c.ListUpstreams(context.Background())
+	wantStatus(t, err, http.StatusServiceUnavailable)
+}
+
 func TestListUpstreamsEmpty(t *testing.T) {
 	_, _, ts := newTestAPI(t)
-	resp, err := http.Get(ts.URL + "/upstreams")
+	resp, err := authClient.Get(ts.URL + "/upstreams")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,21 +257,47 @@ func TestAddAndListUpstreams(t *testing.T) {
 	}
 }
 
+func TestAddUpstreamEncryptsPassword(t *testing.T) {
+	c, srv, _ := newTestAPI(t)
+	addTestUpstream(t, c, "a", "first-secret")
+	addTestUpstream(t, c, "b", "second-secret")
+
+	rows, err := srv.db.Query("SELECT password FROM upstreams")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var sealed []byte
+		if err := rows.Scan(&sealed); err != nil {
+			t.Fatal(err)
+		}
+		if bytes.Contains(sealed, []byte("secret")) {
+			t.Errorf("password stored in plaintext: %q", sealed)
+		}
+	}
+
+	if got := storedPassword(t, srv, "a"); got != "first-secret" {
+		t.Errorf("a: password = %q", got)
+	}
+	if got := storedPassword(t, srv, "b"); got != "second-secret" {
+		t.Errorf("b: password = %q", got)
+	}
+}
+
 func TestAddUpstreamErrors(t *testing.T) {
-	c, _, ts := newTestAPI(t)
+	c, srv, ts := newTestAPI(t)
 	addTestUpstream(t, c, "foo", "secret")
 
 	err := c.AddUpstream(context.Background(), &api.AddUpstreamRequest{
 		Name: "foo", Address: "x:1", Login: "l", Password: "p",
 	})
 	wantStatus(t, err, http.StatusConflict)
+	if got := storedPassword(t, srv, "foo"); got != "secret" {
+		t.Errorf("conflicting add changed password to %q", got)
+	}
 
 	err = c.AddUpstream(context.Background(), &api.AddUpstreamRequest{Name: "bar", Address: "x:1", Login: "l"})
-	wantStatus(t, err, http.StatusBadRequest)
-
-	err = c.AddUpstream(context.Background(), &api.AddUpstreamRequest{
-		Name: "bar", Address: "x:1", Login: "l", Password: strings.Repeat("x", 73),
-	})
 	wantStatus(t, err, http.StatusBadRequest)
 
 	for _, body := range []string{
@@ -143,7 +306,7 @@ func TestAddUpstreamErrors(t *testing.T) {
 		`{"name":"bar","address":"x:1","login":"l","password":"p","pasword":"typo"}`,
 		`{"name":"bar","address":"x:1","login":"l","password":"p"} {}`,
 	} {
-		resp, err := http.Post(ts.URL+"/upstreams", "application/json", strings.NewReader(body))
+		resp, err := authClient.Post(ts.URL+"/upstreams", "application/json", strings.NewReader(body))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -154,14 +317,25 @@ func TestAddUpstreamErrors(t *testing.T) {
 	}
 }
 
+func TestAddUpstreamLongPassword(t *testing.T) {
+	// upstream passwords aren't bcrypt hashes anymore, so bcrypt's 72-byte
+	// limit doesn't apply
+	c, srv, _ := newTestAPI(t)
+	long := strings.Repeat("x", 200)
+	addTestUpstream(t, c, "foo", long)
+	if got := storedPassword(t, srv, "foo"); got != long {
+		t.Errorf("password = %q", got)
+	}
+}
+
 func TestEditUpstream(t *testing.T) {
 	c, srv, _ := newTestAPI(t)
 	ctx := context.Background()
 	addTestUpstream(t, c, "foo", "secret")
 
 	newName, newPassword, addr := "bar", "hunter2", "example.org:23"
-	err := c.EditUpstream(ctx, "foo", "secret", &api.EditUpstreamRequest{
-		NewName: &newName, NewPassword: &newPassword, Address: &addr,
+	err := c.EditUpstream(ctx, "foo", &api.EditUpstreamRequest{
+		NewName: &newName, Password: &newPassword, Address: &addr,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -175,54 +349,47 @@ func TestEditUpstream(t *testing.T) {
 	if len(upstreams) != 1 || upstreams[0] != want {
 		t.Errorf("got %+v", upstreams)
 	}
-
-	var hash string
-	srv.db.QueryRow("SELECT bcrypt FROM upstreams WHERE name='bar'").Scan(&hash)
-	if bcrypt.CompareHashAndPassword([]byte(hash), []byte(newPassword)) != nil {
-		t.Error("password was not updated")
+	if got := storedPassword(t, srv, "bar"); got != newPassword {
+		t.Errorf("password = %q", got)
 	}
 
-	if err := c.EditUpstream(ctx, "bar", newPassword, &api.EditUpstreamRequest{}); err != nil {
+	if err := c.EditUpstream(ctx, "bar", &api.EditUpstreamRequest{}); err != nil {
 		t.Errorf("empty edit: %v", err)
 	}
 }
 
+func TestEditUpstreamRenameKeepsPassword(t *testing.T) {
+	c, srv, _ := newTestAPI(t)
+	addTestUpstream(t, c, "foo", "secret")
+
+	newName := "bar"
+	if err := c.EditUpstream(context.Background(), "foo", &api.EditUpstreamRequest{NewName: &newName}); err != nil {
+		t.Fatal(err)
+	}
+	if got := storedPassword(t, srv, "bar"); got != "secret" {
+		t.Errorf("password = %q", got)
+	}
+}
+
 func TestEditUpstreamErrors(t *testing.T) {
-	c, _, ts := newTestAPI(t)
+	c, srv, _ := newTestAPI(t)
 	ctx := context.Background()
 	addTestUpstream(t, c, "foo", "secret")
 	addTestUpstream(t, c, "bar", "secret")
 	login := "x"
 
-	wantStatus(t, c.EditUpstream(ctx, "foo", "wrong", &api.EditUpstreamRequest{Login: &login}), http.StatusUnauthorized)
-	wantStatus(t, c.EditUpstream(ctx, "nope", "secret", &api.EditUpstreamRequest{Login: &login}), http.StatusNotFound)
+	wantStatus(t, c.EditUpstream(ctx, "nope", &api.EditUpstreamRequest{Login: &login}), http.StatusNotFound)
+	wantStatus(t, c.EditUpstream(ctx, "nope", &api.EditUpstreamRequest{}), http.StatusNotFound)
 
-	taken := "bar"
-	wantStatus(t, c.EditUpstream(ctx, "foo", "secret", &api.EditUpstreamRequest{NewName: &taken}), http.StatusConflict)
+	taken, newPassword := "bar", "changed"
+	err := c.EditUpstream(ctx, "foo", &api.EditUpstreamRequest{NewName: &taken, Password: &newPassword})
+	wantStatus(t, err, http.StatusConflict)
+	if got := storedPassword(t, srv, "foo"); got != "secret" {
+		t.Errorf("failed edit changed password to %q", got)
+	}
 
 	empty := ""
-	wantStatus(t, c.EditUpstream(ctx, "foo", "secret", &api.EditUpstreamRequest{Login: &empty}), http.StatusBadRequest)
-
-	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/upstreams/foo", strings.NewReader(`{}`))
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusUnauthorized || resp.Header.Get("WWW-Authenticate") == "" {
-		t.Errorf("no auth: status %d, WWW-Authenticate %q", resp.StatusCode, resp.Header.Get("WWW-Authenticate"))
-	}
-
-	req, _ = http.NewRequest(http.MethodPatch, ts.URL+"/upstreams/foo", strings.NewReader(`{}`))
-	req.SetBasicAuth("bar", "secret")
-	resp, err = http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusBadRequest {
-		t.Errorf("mismatched name: status %d", resp.StatusCode)
-	}
+	wantStatus(t, c.EditUpstream(ctx, "foo", &api.EditUpstreamRequest{Login: &empty}), http.StatusBadRequest)
 }
 
 func TestDeleteUpstream(t *testing.T) {
@@ -230,10 +397,9 @@ func TestDeleteUpstream(t *testing.T) {
 	ctx := context.Background()
 	addTestUpstream(t, c, "foo", "secret")
 
-	wantStatus(t, c.DeleteUpstream(ctx, "foo", "wrong"), http.StatusUnauthorized)
-	wantStatus(t, c.DeleteUpstream(ctx, "nope", "secret"), http.StatusNotFound)
+	wantStatus(t, c.DeleteUpstream(ctx, "nope"), http.StatusNotFound)
 
-	if err := c.DeleteUpstream(ctx, "foo", "secret"); err != nil {
+	if err := c.DeleteUpstream(ctx, "foo"); err != nil {
 		t.Fatal(err)
 	}
 	upstreams, err := c.ListUpstreams(ctx)
@@ -243,22 +409,133 @@ func TestDeleteUpstream(t *testing.T) {
 	if len(upstreams) != 0 {
 		t.Errorf("got %+v", upstreams)
 	}
+	wantStatus(t, c.DeleteUpstream(ctx, "foo"), http.StatusNotFound)
 }
 
-func TestUpstreamNameWithSpaces(t *testing.T) {
-	c, _, _ := newTestAPI(t)
-	addTestUpstream(t, c, "my game/alt", "secret")
-	if err := c.DeleteUpstream(context.Background(), "my game/alt", "secret"); err != nil {
+type closeRecorder struct {
+	closed bool
+}
+
+func (r *closeRecorder) Write(p []byte) (int, error) { return len(p), nil }
+func (r *closeRecorder) Close() error                { r.closed = true; return nil }
+
+func TestDeleteUpstreamClosesSession(t *testing.T) {
+	c, srv, _ := newTestAPI(t)
+	addTestUpstream(t, c, "foo", "secret")
+	addTestUpstream(t, c, "bar", "secret")
+	foo := addConnected(t, srv.sessions, "foo")
+	bar := addConnected(t, srv.sessions, "bar")
+	fooClient, barClient := &closeRecorder{}, &closeRecorder{}
+	foo.AddDownstream(fooClient)
+	bar.AddDownstream(barClient)
+
+	if err := c.DeleteUpstream(context.Background(), "foo"); err != nil {
 		t.Fatal(err)
+	}
+	if !fooClient.closed {
+		t.Error("client of deleted upstream was not disconnected")
+	}
+	if barClient.closed {
+		t.Error("client of other upstream was disconnected")
+	}
+	srv.sessions.RLock()
+	defer srv.sessions.RUnlock()
+	if _, found := srv.sessions.streams[foo.id]; found {
+		t.Error("deleted upstream is still in the pool")
+	}
+	if srv.sessions.streams[bar.id] != bar {
+		t.Error("other upstream was removed from the pool")
+	}
+}
+
+func TestInvalidUpstreamNames(t *testing.T) {
+	c, _, _ := newTestAPI(t)
+	ctx := context.Background()
+	addTestUpstream(t, c, "foo", "secret")
+
+	for _, name := range []string{"my game/alt", "../../tmp/evil", ".hidden"} {
+		err := c.AddUpstream(ctx, &api.AddUpstreamRequest{Name: name, Address: "x:1", Login: "l", Password: "p"})
+		wantStatus(t, err, http.StatusBadRequest)
+		wantStatus(t, c.EditUpstream(ctx, "foo", &api.EditUpstreamRequest{NewName: &name}), http.StatusBadRequest)
+	}
+}
+
+func TestExistingInvalidNameCanBeFixed(t *testing.T) {
+	// upstreams added before names were validated can still be renamed to a
+	// valid name, or deleted
+	c, srv, _ := newTestAPI(t)
+	ctx := context.Background()
+	for _, name := range []string{"my game/alt", "old name"} {
+		if _, err := srv.db.Exec("INSERT INTO upstreams (name, address, login) VALUES (?, 'x:1', 'l')", name); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	newName := "my-game-alt"
+	if err := c.EditUpstream(ctx, "my game/alt", &api.EditUpstreamRequest{NewName: &newName}); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.DeleteUpstream(ctx, "old name"); err != nil {
+		t.Fatal(err)
+	}
+	upstreams, err := c.ListUpstreams(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(upstreams) != 1 || upstreams[0].Name != newName {
+		t.Errorf("got %+v", upstreams)
+	}
+}
+
+func TestRenameKeepsSession(t *testing.T) {
+	c, srv, _ := newTestAPI(t)
+	ctx := context.Background()
+	addTestUpstream(t, c, "foo", "secret")
+	u := addConnected(t, srv.sessions, "foo")
+
+	newName := "bar"
+	if err := c.EditUpstream(ctx, "foo", &api.EditUpstreamRequest{NewName: &newName}); err != nil {
+		t.Fatal(err)
+	}
+	sessions, err := c.ListSessions(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sessions) != 1 || sessions[0].UpstreamName != "bar" {
+		t.Errorf("got %+v", sessions)
+	}
+	if srv.sessions.streams[u.id] != u {
+		t.Error("renamed upstream's session was replaced")
+	}
+}
+
+func TestDeleteThenReuseName(t *testing.T) {
+	c, srv, _ := newTestAPI(t)
+	ctx := context.Background()
+	addTestUpstream(t, c, "foo", "secret")
+	old := addConnected(t, srv.sessions, "foo")
+
+	if err := c.DeleteUpstream(ctx, "foo"); err != nil {
+		t.Fatal(err)
+	}
+	addTestUpstream(t, c, "foo", "new-secret")
+	if id := upstreamID(t, srv.db, "foo"); id == old.id {
+		t.Errorf("new upstream reused id %d", id)
+	}
+	if poolSize(srv.sessions) != 0 {
+		t.Errorf("pool size = %d", poolSize(srv.sessions))
+	}
+	if got := storedPassword(t, srv, "foo"); got != "new-secret" {
+		t.Errorf("password = %q", got)
 	}
 }
 
 func TestListSessions(t *testing.T) {
 	c, srv, _ := newTestAPI(t)
 	started := time.Date(2026, 10, 28, 12, 0, 0, 0, time.UTC)
-	srv.sessions.streams["b"] = &upstream{key: "b", telnetSession: &telnetSession{startedAt: started}}
-	srv.sessions.streams["a"] = &upstream{key: "a", telnetSession: &telnetSession{startedAt: started.Add(time.Hour)}}
-	srv.sessions.streams["connecting"] = &upstream{key: "connecting"}
+	srv.sessions.streams[1] = &upstream{id: 1, name: "b", telnetSession: &telnetSession{startedAt: started}}
+	srv.sessions.streams[2] = &upstream{id: 2, name: "a", telnetSession: &telnetSession{startedAt: started.Add(time.Hour)}}
+	srv.sessions.streams[3] = &upstream{id: 3, name: "connecting"}
 
 	sessions, err := c.ListSessions(context.Background())
 	if err != nil {
@@ -274,7 +551,7 @@ func TestListSessions(t *testing.T) {
 func TestMethodNotAllowed(t *testing.T) {
 	_, _, ts := newTestAPI(t)
 	req, _ := http.NewRequest(http.MethodPut, ts.URL+"/upstreams", nil)
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := authClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}

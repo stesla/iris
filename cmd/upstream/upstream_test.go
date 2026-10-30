@@ -1,0 +1,205 @@
+package upstream
+
+import (
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"strings"
+	"testing"
+
+	"github.com/spf13/viper"
+	"github.com/stretchr/testify/require"
+)
+
+type request struct {
+	method, path string
+	user, pass   string
+	body         string
+}
+
+// newTestServer starts a fake management API that records each request and
+// answers with status and body.
+func newTestServer(t *testing.T, status int, body string) *[]request {
+	t.Helper()
+	var requests []request
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		user, pass, _ := r.BasicAuth()
+		b, _ := io.ReadAll(r.Body)
+		requests = append(requests, request{r.Method, r.URL.EscapedPath(), user, pass, string(b)})
+		w.WriteHeader(status)
+		io.WriteString(w, body)
+	}))
+	t.Cleanup(srv.Close)
+
+	viper.Set("api.client.url", srv.URL)
+	viper.Set("api.client.password", "iris-secret")
+	t.Cleanup(func() {
+		viper.Set("api.client.url", "")
+		viper.Set("api.client.password", "")
+	})
+	return &requests
+}
+
+// setStdin replaces standard input with a pipe holding input, which is never
+// a terminal.
+func setStdin(t *testing.T, input string) {
+	t.Helper()
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+	_, err = io.WriteString(w, input)
+	require.NoError(t, err)
+	require.NoError(t, w.Close())
+	old := os.Stdin
+	os.Stdin = r
+	t.Cleanup(func() {
+		os.Stdin = old
+		r.Close()
+	})
+}
+
+// run runs `iris upstream` with args, resetting the flags first since they
+// are package variables that persist between runs.
+func run(t *testing.T, args ...string) error {
+	t.Helper()
+	address, login, newName, password, script = "", "", "", "", ""
+	pkgcmd.SetArgs(args)
+	pkgcmd.SetOut(io.Discard)
+	pkgcmd.SetErr(io.Discard)
+	return pkgcmd.Execute()
+}
+
+func TestAddWithPassword(t *testing.T) {
+	requests := newTestServer(t, http.StatusCreated, "")
+	setStdin(t, "")
+
+	require.NoError(t, run(t, "add", "shang.beth", "game-secret", "-a", "example.com:4201", "-l", "beth"))
+	require.Len(t, *requests, 1)
+	r := (*requests)[0]
+	require.Equal(t, "POST", r.method)
+	require.Equal(t, "/upstreams", r.path)
+	require.Equal(t, "iris", r.user)
+	require.Equal(t, "iris-secret", r.pass)
+	require.JSONEq(t, `{"name":"shang.beth","address":"example.com:4201","login":"beth","password":"game-secret"}`, r.body)
+}
+
+func TestAddPasswordFromStdin(t *testing.T) {
+	requests := newTestServer(t, http.StatusCreated, "")
+	setStdin(t, "piped-secret\n")
+
+	require.NoError(t, run(t, "add", "game", "-a", "example.com:4201", "-l", "me", "-s", "connect %LOGIN%"))
+	require.Len(t, *requests, 1)
+	require.JSONEq(t,
+		`{"name":"game","address":"example.com:4201","login":"me","password":"piped-secret","script":"connect %LOGIN%"}`,
+		(*requests)[0].body)
+}
+
+func TestAddEmptyPassword(t *testing.T) {
+	requests := newTestServer(t, http.StatusCreated, "")
+	setStdin(t, "\n")
+
+	require.ErrorContains(t, run(t, "add", "game", "-a", "example.com:4201", "-l", "me"), "upstream password cannot be empty")
+	require.Empty(t, *requests)
+}
+
+func TestEdit(t *testing.T) {
+	requests := newTestServer(t, http.StatusNoContent, "")
+	setStdin(t, "")
+
+	require.NoError(t, run(t, "edit", "game", "-n", "renamed", "-a", "example.org:23", "-l", "other"))
+	require.Len(t, *requests, 1)
+	r := (*requests)[0]
+	require.Equal(t, "PATCH", r.method)
+	require.Equal(t, "/upstreams/game", r.path)
+	require.Equal(t, "iris-secret", r.pass)
+	// no -p, so the password is left alone
+	require.JSONEq(t, `{"new_name":"renamed","address":"example.org:23","login":"other"}`, r.body)
+}
+
+func TestEditPassword(t *testing.T) {
+	requests := newTestServer(t, http.StatusNoContent, "")
+	setStdin(t, "")
+
+	require.NoError(t, run(t, "edit", "game", "-p", "literal"))
+	require.JSONEq(t, `{"password":"literal"}`, (*requests)[0].body)
+}
+
+func TestEditPasswordFromStdin(t *testing.T) {
+	for _, flag := range [][]string{{"-p", "-"}, {"--password=-"}} {
+		requests := newTestServer(t, http.StatusNoContent, "")
+		setStdin(t, "piped-secret\r\n")
+
+		require.NoError(t, run(t, append([]string{"edit", "game"}, flag...)...))
+		require.Len(t, *requests, 1, "%v", flag)
+		require.JSONEq(t, `{"password":"piped-secret"}`, (*requests)[0].body, "%v", flag)
+	}
+}
+
+func TestEditEmptyPasswordFromStdin(t *testing.T) {
+	requests := newTestServer(t, http.StatusNoContent, "")
+	setStdin(t, "")
+
+	require.ErrorContains(t, run(t, "edit", "game", "-p", "-"), "upstream password cannot be empty")
+	require.Empty(t, *requests)
+}
+
+func TestDelete(t *testing.T) {
+	requests := newTestServer(t, http.StatusNoContent, "")
+	setStdin(t, "")
+
+	require.NoError(t, run(t, "delete", "shang.beth"))
+	require.Len(t, *requests, 1)
+	r := (*requests)[0]
+	require.Equal(t, "DELETE", r.method)
+	require.Equal(t, "/upstreams/shang.beth", r.path)
+	require.Equal(t, "iris-secret", r.pass)
+}
+
+func TestOldPasswordArgumentsRejected(t *testing.T) {
+	requests := newTestServer(t, http.StatusNoContent, "")
+	setStdin(t, "")
+
+	require.Error(t, run(t, "delete", "game", "game-secret"))
+	require.Error(t, run(t, "edit", "game", "game-secret"))
+	require.Empty(t, *requests)
+}
+
+func TestList(t *testing.T) {
+	newTestServer(t, http.StatusOK,
+		`{"upstreams":[{"name":"shang.beth","address":"example.com:4201","login":"beth"}]}`)
+	setStdin(t, "")
+
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+	old := os.Stdout
+	os.Stdout = w
+	err = run(t, "list")
+	os.Stdout = old
+	w.Close()
+	require.NoError(t, err)
+
+	out, err := io.ReadAll(r)
+	require.NoError(t, err)
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	require.Len(t, lines, 2)
+	require.Equal(t, []string{"NAME", "ADDRESS", "LOGIN"}, strings.Fields(lines[0]))
+	require.Equal(t, []string{"shang.beth", "example.com:4201", "beth"}, strings.Fields(lines[1]))
+}
+
+func TestNoIrisPassword(t *testing.T) {
+	requests := newTestServer(t, http.StatusOK, `{"upstreams":[]}`)
+	viper.Set("api.client.password", "")
+	setStdin(t, "")
+
+	err := run(t, "list")
+	require.ErrorContains(t, err, "api.client.password")
+	require.ErrorContains(t, err, "IRIS_API_CLIENT_PASSWORD")
+	require.Empty(t, *requests)
+}
+
+func TestServerError(t *testing.T) {
+	newTestServer(t, http.StatusUnauthorized, `{"error":"incorrect password"}`)
+	setStdin(t, "")
+
+	require.EqualError(t, run(t, "list"), "incorrect password")
+}

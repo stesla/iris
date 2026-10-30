@@ -6,6 +6,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
+	"github.com/stesla/iris/cmd/password"
 	"github.com/stesla/iris/cmd/serve"
 	"github.com/stesla/iris/cmd/upstream"
 )
@@ -30,7 +31,9 @@ func init() {
 	viper.SetDefault("api.server.addr", "localhost:40042")
 	viper.SetDefault("log.level", "info")
 	viper.SetDefault("log.dir", "./logs")
+	viper.SetDefault("secret.key_file", "./iris.key")
 
+	password.AddToCommand(rootCmd)
 	serve.AddToCommand(rootCmd)
 	upstream.AddToCommand(rootCmd)
 }

@@ -35,3 +35,4 @@ logs/
 
 config.yaml
 *.db
+iris.key

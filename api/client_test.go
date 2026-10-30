@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -33,7 +34,15 @@ func newTestServer(t *testing.T, status int, respBody string) (*Client, *recorde
 		io.WriteString(w, respBody)
 	}))
 	t.Cleanup(srv.Close)
-	return NewClient(srv.URL + "/"), rec
+	return NewClient(srv.URL+"/", "iris-secret"), rec
+}
+
+// wantAuth checks that the request had basic auth with the Iris password.
+func wantAuth(t *testing.T, rec *recorded) {
+	t.Helper()
+	if !rec.hasAuth || rec.user != DefaultUsername || rec.pass != "iris-secret" {
+		t.Errorf("basic auth = %v %q:%q", rec.hasAuth, rec.user, rec.pass)
+	}
 }
 
 func TestListSessions(t *testing.T) {
@@ -47,6 +56,7 @@ func TestListSessions(t *testing.T) {
 	if rec.method != http.MethodGet || rec.path != "/sessions" {
 		t.Errorf("got %s %s", rec.method, rec.path)
 	}
+	wantAuth(t, rec)
 	want := time.Date(2026, 10, 28, 12, 0, 0, 0, time.UTC)
 	if len(sessions) != 1 || sessions[0].UpstreamName != "foo" || !sessions[0].TimeStarted.Equal(want) {
 		t.Errorf("got %+v", sessions)
@@ -64,6 +74,7 @@ func TestListUpstreams(t *testing.T) {
 	if rec.method != http.MethodGet || rec.path != "/upstreams" {
 		t.Errorf("got %s %s", rec.method, rec.path)
 	}
+	wantAuth(t, rec)
 	want := Upstream{Name: "foo", Address: "example.com:4201", Login: "bar"}
 	if len(upstreams) != 1 || upstreams[0] != want {
 		t.Errorf("got %+v", upstreams)
@@ -82,9 +93,7 @@ func TestAddUpstream(t *testing.T) {
 	if rec.method != http.MethodPost || rec.path != "/upstreams" {
 		t.Errorf("got %s %s", rec.method, rec.path)
 	}
-	if rec.hasAuth {
-		t.Error("add should not send basic auth")
-	}
+	wantAuth(t, rec)
 	if rec.contentType != "application/json" {
 		t.Errorf("content-type = %q", rec.contentType)
 	}
@@ -98,17 +107,16 @@ func TestEditUpstream(t *testing.T) {
 	c, rec := newTestServer(t, http.StatusNoContent, "")
 
 	addr := "example.org:23"
-	err := c.EditUpstream(context.Background(), "my upstream", "secret", &EditUpstreamRequest{Address: &addr})
+	password := "hunter2"
+	err := c.EditUpstream(context.Background(), "my upstream", &EditUpstreamRequest{Address: &addr, Password: &password})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if rec.method != http.MethodPatch || rec.path != "/upstreams/my%20upstream" {
 		t.Errorf("got %s %s", rec.method, rec.path)
 	}
-	if rec.user != "my upstream" || rec.pass != "secret" {
-		t.Errorf("basic auth = %q:%q", rec.user, rec.pass)
-	}
-	if want := `{"address":"example.org:23"}`; rec.body != want {
+	wantAuth(t, rec)
+	if want := `{"password":"hunter2","address":"example.org:23"}`; rec.body != want {
 		t.Errorf("body = %s", rec.body)
 	}
 }
@@ -116,15 +124,13 @@ func TestEditUpstream(t *testing.T) {
 func TestDeleteUpstream(t *testing.T) {
 	c, rec := newTestServer(t, http.StatusNoContent, "")
 
-	if err := c.DeleteUpstream(context.Background(), "foo", "secret"); err != nil {
+	if err := c.DeleteUpstream(context.Background(), "foo"); err != nil {
 		t.Fatal(err)
 	}
 	if rec.method != http.MethodDelete || rec.path != "/upstreams/foo" {
 		t.Errorf("got %s %s", rec.method, rec.path)
 	}
-	if rec.user != "foo" || rec.pass != "secret" {
-		t.Errorf("basic auth = %q:%q", rec.user, rec.pass)
-	}
+	wantAuth(t, rec)
 	if rec.body != "" {
 		t.Errorf("body = %s", rec.body)
 	}
@@ -133,7 +139,7 @@ func TestDeleteUpstream(t *testing.T) {
 func TestErrorResponse(t *testing.T) {
 	c, _ := newTestServer(t, http.StatusUnauthorized, `{"error":"bad password"}`)
 
-	err := c.DeleteUpstream(context.Background(), "foo", "wrong")
+	err := c.DeleteUpstream(context.Background(), "foo")
 	var apiErr *Error
 	if !errors.As(err, &apiErr) {
 		t.Fatalf("got %T %v", err, err)
@@ -168,6 +174,36 @@ func TestValidate(t *testing.T) {
 	}
 	if err := (&EditUpstreamRequest{NewName: &empty}).Validate(); err == nil {
 		t.Error("edit with empty new_name should fail")
+	}
+	if err := (&EditUpstreamRequest{Password: &empty}).Validate(); err == nil {
+		t.Error("edit with empty password should fail")
+	}
+	for _, name := range []string{"shang.beth", "a", "Game_2-alt", strings.Repeat("x", 64)} {
+		if !ValidName(name) {
+			t.Errorf("%q should be valid", name)
+		}
+		add := full
+		add.Name = name
+		if err := add.Validate(); err != nil {
+			t.Errorf("add %q: %v", name, err)
+		}
+	}
+	for _, name := range []string{
+		".", "..", ".hidden", "-flag", "_x", "my game", "a/b", "../../etc/x", `a\b`,
+		"tab\there", "new\nline", "café", strings.Repeat("x", 65),
+	} {
+		if ValidName(name) {
+			t.Errorf("%q should be invalid", name)
+		}
+		add := full
+		add.Name = name
+		if err := add.Validate(); err == nil {
+			t.Errorf("add %q should fail", name)
+		}
+		edit := EditUpstreamRequest{NewName: &name}
+		if err := edit.Validate(); err == nil {
+			t.Errorf("rename to %q should fail", name)
+		}
 	}
 	// round-trip check that omitted optionals stay nil
 	var r EditUpstreamRequest

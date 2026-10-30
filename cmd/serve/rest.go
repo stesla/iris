@@ -15,6 +15,8 @@ import (
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/stesla/iris/api"
+	"github.com/stesla/iris/internal/auth"
+	"github.com/stesla/iris/internal/secret"
 )
 
 const maxBodyBytes = 1 << 20
@@ -22,6 +24,7 @@ const maxBodyBytes = 1 << 20
 type apiServer struct {
 	db       *sql.DB
 	sessions *SessionPool
+	box      *secret.Box
 }
 
 func (s *apiServer) handler() http.Handler {
@@ -31,7 +34,24 @@ func (s *apiServer) handler() http.Handler {
 	mux.HandleFunc("POST /upstreams", s.handleAddUpstream)
 	mux.HandleFunc("PATCH /upstreams/{name}", s.handleEditUpstream)
 	mux.HandleFunc("DELETE /upstreams/{name}", s.handleDeleteUpstream)
-	return logRequests(mux)
+	return logRequests(s.requireAuth(mux))
+}
+
+// requireAuth requires every request to have basic auth with the Iris
+// password. The username is ignored until Iris supports multiple users.
+func (s *apiServer) requireAuth(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, password, ok := r.BasicAuth()
+		if !ok {
+			writeError(w, r, &statusError{http.StatusUnauthorized, errors.New("basic auth is required")})
+			return
+		}
+		if err := auth.CheckPassword(r.Context(), s.db, password); err != nil {
+			writeError(w, r, err)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func (s *apiServer) handleListSessions(w http.ResponseWriter, r *http.Request) {
@@ -65,11 +85,6 @@ func (s *apiServer) handleAddUpstream(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *apiServer) handleEditUpstream(w http.ResponseWriter, r *http.Request) {
-	name, password, err := basicAuth(r)
-	if err != nil {
-		writeError(w, r, err)
-		return
-	}
 	var req api.EditUpstreamRequest
 	if err := decodeJSON(w, r, &req); err != nil {
 		writeError(w, r, err)
@@ -79,7 +94,7 @@ func (s *apiServer) handleEditUpstream(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, badRequest(err))
 		return
 	}
-	if err := s.editUpstream(r.Context(), name, password, &req); err != nil {
+	if err := s.editUpstream(r.Context(), r.PathValue("name"), &req); err != nil {
 		writeError(w, r, err)
 		return
 	}
@@ -87,35 +102,26 @@ func (s *apiServer) handleEditUpstream(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *apiServer) handleDeleteUpstream(w http.ResponseWriter, r *http.Request) {
-	name, password, err := basicAuth(r)
-	if err != nil {
-		writeError(w, r, err)
-		return
-	}
-	if err := s.deleteUpstream(r.Context(), name, password); err != nil {
+	if err := s.deleteUpstream(r.Context(), r.PathValue("name")); err != nil {
 		writeError(w, r, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (s *apiServer) authenticate(ctx context.Context, name, password string) error {
-	_, err := authenticateUpstream(ctx, s.db, name, password)
-	return err
-}
-
 func (s *apiServer) listSessions() []api.Session {
 	s.sessions.RLock()
 	defer s.sessions.RUnlock()
 	result := make([]api.Session, 0, len(s.sessions.streams))
-	for key, upstream := range s.sessions.streams {
+	for _, upstream := range s.sessions.streams {
+		name, startedAt, connected := upstream.info()
 		// upstreams are added to the pool before they finish connecting
-		if !upstream.IsConnected() {
+		if !connected {
 			continue
 		}
 		result = append(result, api.Session{
-			UpstreamName: key,
-			TimeStarted:  upstream.startedAt,
+			UpstreamName: name,
+			TimeStarted:  startedAt,
 		})
 	}
 	slices.SortFunc(result, func(a, b api.Session) int {
@@ -142,29 +148,51 @@ func (s *apiServer) listUpstreams(ctx context.Context) ([]api.Upstream, error) {
 }
 
 func (s *apiServer) addUpstream(ctx context.Context, r *api.AddUpstreamRequest) error {
-	hash, err := bcrypt.GenerateFromPassword([]byte(r.Password), bcrypt.DefaultCost)
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
+	defer tx.Rollback()
 
-	_, err = s.db.ExecContext(ctx,
-		"INSERT INTO upstreams (name, address, login, bcrypt, script) VALUES (?, ?, ?, ?, ?)",
-		r.Name, r.Address, r.Login, hash, r.Script,
+	// the password is sealed with the new row's id, so it can only be set
+	// once the row exists
+	res, err := tx.ExecContext(ctx,
+		"INSERT INTO upstreams (name, address, login, script) VALUES (?, ?, ?, ?)",
+		r.Name, r.Address, r.Login, r.Script,
 	)
-	return err
-}
-
-func (s *apiServer) deleteUpstream(ctx context.Context, name, password string) error {
-	if err := s.authenticate(ctx, name, password); err != nil {
+	if err != nil {
 		return err
 	}
-
-	_, err := s.db.ExecContext(ctx, "DELETE FROM upstreams WHERE name=?", name)
-	return err
+	id, err := res.LastInsertId()
+	if err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, "UPDATE upstreams SET password=? WHERE id=?", s.box.Seal(id, []byte(r.Password)), id)
+	if err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
-func (s *apiServer) editUpstream(ctx context.Context, name, password string, r *api.EditUpstreamRequest) error {
-	if err := s.authenticate(ctx, name, password); err != nil {
+func (s *apiServer) deleteUpstream(ctx context.Context, name string) error {
+	var id int64
+	err := s.db.QueryRowContext(ctx, "DELETE FROM upstreams WHERE name=? RETURNING id", name).Scan(&id)
+	if err != nil {
+		return err
+	}
+	s.sessions.closeUpstream(id)
+	return nil
+}
+
+func (s *apiServer) editUpstream(ctx context.Context, name string, r *api.EditUpstreamRequest) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	var id int64
+	if err := tx.QueryRowContext(ctx, "SELECT id FROM upstreams WHERE name=?", name).Scan(&id); err != nil {
 		return err
 	}
 
@@ -178,12 +206,8 @@ func (s *apiServer) editUpstream(ctx context.Context, name, password string, r *
 	if r.NewName != nil {
 		set("name", *r.NewName)
 	}
-	if r.NewPassword != nil {
-		hash, err := bcrypt.GenerateFromPassword([]byte(*r.NewPassword), bcrypt.DefaultCost)
-		if err != nil {
-			return err
-		}
-		set("bcrypt", hash)
+	if r.Password != nil {
+		set("password", s.box.Seal(id, []byte(*r.Password)))
 	}
 	if r.Address != nil {
 		set("address", *r.Address)
@@ -199,11 +223,19 @@ func (s *apiServer) editUpstream(ctx context.Context, name, password string, r *
 		return nil
 	}
 
-	query := "UPDATE upstreams SET " + strings.Join(sets, ", ") + " WHERE name=?"
-	args = append(args, name)
+	query := "UPDATE upstreams SET " + strings.Join(sets, ", ") + " WHERE id=?"
+	args = append(args, id)
 
-	_, err := s.db.ExecContext(ctx, query, args...)
-	return err
+	if _, err := tx.ExecContext(ctx, query, args...); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	if r.NewName != nil {
+		s.sessions.renameUpstream(id, *r.NewName)
+	}
+	return nil
 }
 
 type statusError struct {
@@ -216,19 +248,6 @@ func (e *statusError) Unwrap() error { return e.err }
 
 func badRequest(err error) error {
 	return &statusError{http.StatusBadRequest, err}
-}
-
-// basicAuth returns the upstream name and password from the request's basic
-// auth, which must name the same upstream as the URL.
-func basicAuth(r *http.Request) (name, password string, err error) {
-	name, password, ok := r.BasicAuth()
-	if !ok {
-		return "", "", &statusError{http.StatusUnauthorized, errors.New("basic auth is required")}
-	}
-	if name != r.PathValue("name") {
-		return "", "", badRequest(errors.New("basic auth username does not match upstream name"))
-	}
-	return name, password, nil
 }
 
 func decodeJSON(w http.ResponseWriter, r *http.Request, v any) error {
@@ -266,8 +285,8 @@ func writeError(w http.ResponseWriter, r *http.Request, err error) {
 		status, msg = http.StatusNotFound, "upstream not found"
 	case errors.Is(err, bcrypt.ErrMismatchedHashAndPassword):
 		status, msg = http.StatusUnauthorized, "incorrect password"
-	case errors.Is(err, bcrypt.ErrPasswordTooLong):
-		status, msg = http.StatusBadRequest, err.Error()
+	case errors.Is(err, auth.ErrPasswordNotSet):
+		status, msg = http.StatusServiceUnavailable, err.Error()
 	case errors.As(err, &sqliteErr) &&
 		(sqliteErr.ExtendedCode == sqlite3.ErrConstraintPrimaryKey ||
 			sqliteErr.ExtendedCode == sqlite3.ErrConstraintUnique):

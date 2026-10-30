@@ -1,7 +1,10 @@
 package serve
 
 import (
+	"context"
 	"database/sql"
+	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"os"
@@ -13,6 +16,9 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+
+	"github.com/stesla/iris/internal/auth"
+	"github.com/stesla/iris/internal/secret"
 )
 
 var logger = zerolog.New(os.Stdout)
@@ -35,16 +41,26 @@ func Serve(cmd *cobra.Command, args []string) {
 		logger.Level(l)
 	}
 
-	sessions := NewSessionPool(db, logger)
+	if set, err := auth.PasswordIsSet(context.Background(), db); err != nil {
+		cobra.CheckErr(fmt.Errorf("checking iris password (have the migrations been run?): %w", err))
+	} else if !set {
+		cobra.CheckErr(errors.New("no iris password is set; run `iris password` to set one"))
+	}
 
-	go runApiServer(db, sessions)
+	box, err := secret.LoadOrCreateKey(viper.GetString("secret.key_file"))
+	cobra.CheckErr(err)
+
+	sessions := NewSessionPool(db, box, logger)
+
+	go runApiServer(db, sessions, box)
 	runTelnetProxy(sessions)
 }
 
-func runApiServer(db *sql.DB, sessions *SessionPool) {
+func runApiServer(db *sql.DB, sessions *SessionPool, box *secret.Box) {
 	srv := &apiServer{
 		db:       db,
 		sessions: sessions,
+		box:      box,
 	}
 	addr := viper.GetString("api.server.addr")
 	server := &http.Server{
