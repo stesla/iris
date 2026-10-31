@@ -112,7 +112,7 @@ request and a Telnet login.
       so for example `delete` accepts `-a` and ignores it. Register each
       flag only on the subcommands that use it, so a wrong flag is an
       error.
-- [ ] **A failed `logFile.Reopen` disconnects the upstream**
+- [x] **A failed `logFile.Reopen` disconnects the upstream**
       (`cmd/serve/session.go`). `ReopenHistories` closes the upstream if
       `Reopen` fails, for example on a full disk or a bad `log.dir`. One SIGHUP
       can then drop every game connection and every attached client.

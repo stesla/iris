@@ -1186,6 +1186,113 @@ func TestLogFileReopenAfterClose(t *testing.T) {
 	}
 }
 
+func TestLogFileCloseTwice(t *testing.T) {
+	dir := useLogDir(t)
+	history, err := newHistory("game")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := history.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := history.Close(); err != nil {
+		t.Errorf("second close: %v", err)
+	}
+	if got := strings.Count(readLogs(t, dir), "--------------- closed"); got != 1 {
+		t.Errorf("closed %d times", got)
+	}
+}
+
+func TestLogFileFailedReopenKeepsOldFile(t *testing.T) {
+	dir := useLogDir(t)
+	history, err := newHistory("game")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer history.Close()
+
+	viper.Set("log.dir", filepath.Join(dir, "missing"))
+	if err := history.Reopen("other"); err == nil {
+		t.Fatal("no error")
+	}
+	viper.Set("log.dir", dir)
+
+	if _, err := history.Write([]byte("after the failure\n")); err != nil {
+		t.Fatal(err)
+	}
+	logs := readLogs(t, dir)
+	if !strings.Contains(logs, "after the failure\n") {
+		t.Errorf("nothing reached the log: %q", logs)
+	}
+	if strings.Contains(logs, "--------------- closed") {
+		t.Errorf("the old file was closed: %q", logs)
+	}
+	var replay bytes.Buffer
+	if _, err := history.WriteTo(&replay); err != nil {
+		t.Fatal(err)
+	}
+	if replay.String() != "after the failure\n" {
+		t.Errorf("replayed %q", replay.String())
+	}
+	paths, err := filepath.Glob(filepath.Join(dir, "*-other.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(paths) != 0 {
+		t.Errorf("opened %v", paths)
+	}
+}
+
+func TestLogFileReopenWritesSeparatorsInOrder(t *testing.T) {
+	dir := useLogDir(t)
+	history, err := newHistory("game")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer history.Close()
+	if err := history.Reopen("game"); err != nil {
+		t.Fatal(err)
+	}
+	// replay starts after the last "opened", so "closed" must come before it
+	logs := readLogs(t, dir)
+	closed, opened := strings.Index(logs, "--------------- closed"), strings.LastIndex(logs, logSepOpened)
+	if closed < 0 || closed > opened {
+		t.Errorf("log is %q", logs)
+	}
+}
+
+func TestFailedReopenHistoriesKeepsUpstream(t *testing.T) {
+	addr, _, send := listenGame(t)
+	p := newTestPool(t, addr)
+	d, err := login(t, p, loginMsg("game", testIrisPassword))
+	if err != nil {
+		t.Fatal(err)
+	}
+	u := d.upstream
+	dir := viper.GetString("log.dir")
+
+	viper.Set("log.dir", filepath.Join(dir, "missing"))
+	p.ReopenHistories()
+	viper.Set("log.dir", dir)
+
+	if poolSize(p) != 1 {
+		t.Errorf("pool size = %d", poolSize(p))
+	}
+	if !u.IsConnected() {
+		t.Error("upstream was disconnected")
+	}
+	send("after the failure\r\n")
+	waitForHistory(t, "game", "after the failure")
+
+	// the next signal can recover, once the problem is fixed
+	p.ReopenHistories()
+	send("after recovering\r\n")
+	waitForHistory(t, "game", "after recovering")
+	if got := strings.Count(readLogs(t, dir), logSepOpened); got != 2 {
+		t.Errorf("opened %d times", got)
+	}
+}
+
 func TestLogFileReplayToStuckClientDoesNotBlockWrite(t *testing.T) {
 	useLogDir(t)
 	history, err := newHistory("game")

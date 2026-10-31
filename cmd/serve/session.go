@@ -110,9 +110,10 @@ func (p *SessionPool) ReopenHistories() {
 		if history == nil {
 			continue
 		}
-		// reopening also picks up a new name if the upstream was renamed
+		// reopening also picks up a new name if the upstream was renamed. A
+		// failure leaves it logging to the old file, so it isn't worth dropping
+		// the game connection for.
 		if err := history.Reopen(name); err != nil {
-			session.Close()
 			p.logger.Error().Err(err).Str("upstream", name).Msg("error reloading history")
 		}
 	}
@@ -848,7 +849,8 @@ type History interface {
 	io.WriteCloser
 	io.WriterTo
 	// Reopen closes the log and opens it again under name, which changes if
-	// the upstream was renamed.
+	// the upstream was renamed. If it can't open the new file, it returns an
+	// error and keeps logging to the old one.
 	Reopen(name string) error
 }
 
@@ -872,51 +874,69 @@ type logFile struct {
 	file        *os.File
 	key         string
 	historySize int64
+	closed      bool
 }
 
 func (f *logFile) Open() error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return f.open()
+	file, err := openLog(f.key)
+	if err != nil {
+		return err
+	}
+	f.file = file
+	writeSeparator(f.file, "opened")
+	return nil
 }
 
-func (f *logFile) open() (err error) {
+func openLog(key string) (*os.File, error) {
 	logFileName := path.Join(
 		viper.GetString("log.dir"),
-		fmt.Sprintf("%s-%s.log", time.Now().Format("2006-01-02"), f.key),
+		fmt.Sprintf("%s-%s.log", time.Now().Format("2006-01-02"), key),
 	)
-	f.file, err = os.OpenFile(
+	return os.OpenFile(
 		logFileName,
 		os.O_APPEND|os.O_CREATE|os.O_WRONLY,
 		0644,
 	)
-	if err == nil {
-		t := time.Now()
-		fmt.Fprintf(f.file, logSeperator, "opened", t.Format(logTimeFormat))
-	}
-	return
+}
+
+func writeSeparator(file *os.File, event string) {
+	fmt.Fprintf(file, logSeperator, event, time.Now().Format(logTimeFormat))
 }
 
 func (f *logFile) Close() error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return f.close()
+	if f.closed {
+		return nil
+	}
+	f.closed = true
+	return f.closeFile()
 }
 
-func (f *logFile) close() error {
-	t := time.Now()
-	fmt.Fprintf(f.file, logSeperator, "closed", t.Format(logTimeFormat))
+func (f *logFile) closeFile() error {
+	writeSeparator(f.file, "closed")
 	return f.file.Close()
 }
 
-func (f *logFile) Reopen(name string) (err error) {
+// Reopen opens the new file before closing the old one, so that a failure leaves
+// the log working. It still writes "closed" before "opened", since both can be
+// the same file and replay starts after the last "opened".
+func (f *logFile) Reopen(name string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if err = f.close(); err != nil {
-		return
+	if f.closed {
+		return os.ErrClosed
 	}
-	f.key = name
-	return f.open()
+	file, err := openLog(name)
+	if err != nil {
+		return err
+	}
+	err = f.closeFile()
+	f.file, f.key = file, name
+	writeSeparator(f.file, "opened")
+	return err
 }
 
 func (f *logFile) Write(p []byte) (int, error) {

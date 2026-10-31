@@ -28,7 +28,7 @@ This file is written so a fresh session can pick up with no other context.
 
 Phase 1: Reporting and log files
 - [x] 1. `don't list closed upstreams in GET /sessions`
-- [ ] 2. `keep the old log open when a reopen fails`
+- [x] 2. `keep the old log open when a reopen fails`
 - [ ] 3. `keep history replay across a reopen` (not in `TODO.md`)
 - [ ] 4. `test the SIGHUP handler with a real signal`
 

@@ -15,7 +15,7 @@ Iris is a Telnet proxy/gateway application written in Go that acts as an interme
   - Persistent session history stored in dated log files
   - Automatic history trimming (default 20KB)
   - History replay for new connections to existing upstreams
-  - SIGHUP signal handling to reopen history files without disconnecting
+  - SIGHUP signal handling to reopen history files without disconnecting; if a file can't be reopened, the error is logged and Iris keeps logging to the old file
 - **Telnet Protocol Support**:
   - RFC-compliant option negotiation (Suppress Go Ahead, End of Record, Transmit Binary, Charset)
   - Subnegotiation handling for character set negotiation
