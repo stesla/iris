@@ -71,7 +71,7 @@ request and a Telnet login.
     config instead.
   - Fix with `viper.BindEnv("config")`, or read `os.Getenv("IRIS_CONFIG")`
     directly, before the check.
-- [ ] **Input sent with the login is dropped.** `readLogin`
+- [x] **Input sent with the login is dropped.** `readLogin`
       (`cmd/serve/session.go`) decodes through a `json.Decoder`, which
       buffers past the end of the JSON object. Anything the client sends
       right after its login, in the same packet, is lost instead of going to

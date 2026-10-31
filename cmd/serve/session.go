@@ -277,7 +277,8 @@ func (s *telnetSession) negotiateOptions() {
 type downstream struct {
 	pool *SessionPool
 	*telnetSession
-	upstream *upstream
+	upstream   *upstream
+	afterLogin []byte // input read along with the login, to forward once connected
 }
 
 // loginRequest is the JSON a client sends to log in. It is decoded into its
@@ -459,6 +460,13 @@ func (s *downstream) readLogin() (*loginRequest, error) {
 	if err := decoder.Decode(&login); err != nil {
 		return nil, err
 	}
+	// the decoder reads past the end of the login. The first newline is the
+	// Enter that finished the login line, so it isn't input for the game.
+	buffered, err := io.ReadAll(decoder.Buffered())
+	if err != nil {
+		return nil, err
+	}
+	s.afterLogin = bytes.TrimPrefix(buffered, []byte("\n"))
 	return &login, s.conn.SetReadDeadline(time.Time{})
 }
 
@@ -527,7 +535,7 @@ func (s *downstream) runForever() {
 		s.logger.Info().AnErr("error", err).Msg("error connecting upstream")
 		return
 	}
-	io.Copy(s.upstream, s)
+	io.Copy(s.upstream, io.MultiReader(bytes.NewReader(s.afterLogin), s))
 }
 
 type upstream struct {

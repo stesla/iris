@@ -67,7 +67,7 @@ Phase 4: Session races
 - [x] 12. `tell the client when its upstream is deleted while connecting`
 
 Phase 5: Client I/O
-- [ ] 13. `forward input sent with the login`
+- [x] 13. `forward input sent with the login`
 - [ ] 14. `serialize telnet connection writes` (not in TODO)
 - [ ] 15. `buffer history replay until negotiation completes`
 

@@ -1757,3 +1757,123 @@ func TestFirstClientReceivesGameOutputSentOnAccept(t *testing.T) {
 		t.Fatal("client never received the game's first output")
 	}
 }
+
+// serveClient serves a client as runTelnetProxy does, sending input in one
+// write and discarding what Iris writes back. The returned channel is closed
+// when Iris is done with the client.
+func serveClient(t *testing.T, p *SessionPool, input string) (net.Conn, <-chan struct{}) {
+	t.Helper()
+	client, server := net.Pipe()
+	t.Cleanup(func() { client.Close(); server.Close() })
+	go io.Copy(io.Discard, client)
+	go io.WriteString(client, input)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		d := p.NewDownstream(server)
+		defer d.Close()
+		d.runForever()
+	}()
+	return client, done
+}
+
+// stripNegotiation removes Telnet option negotiation, which Iris sends to the
+// game at the same time as the client's input.
+func stripNegotiation(line string) string {
+	var out strings.Builder
+	for i := 0; i < len(line); i++ {
+		if line[i] == telnet.IAC && i+2 < len(line) {
+			i += 2
+			continue
+		}
+		out.WriteByte(line[i])
+	}
+	return out.String()
+}
+
+// wantLines checks that the game receives exactly the given lines, in order.
+func wantLines(t *testing.T, lines <-chan string, want ...string) {
+	t.Helper()
+	for _, w := range want {
+		select {
+		case line, ok := <-lines:
+			if !ok {
+				t.Fatalf("connection closed waiting for %q", w)
+			}
+			if got := stripNegotiation(line); got != w {
+				t.Fatalf("game received %q, want %q", got, w)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatalf("game never received %q", w)
+		}
+	}
+}
+
+func TestInputSentWithLogin(t *testing.T) {
+	const script = "connect me " + testUpstreamPassword + "\r\n"
+	tests := []struct {
+		name  string
+		after string // sent in the same write as the login
+		want  []string
+	}{
+		{"line after login", "\nlook\n", []string{script, "look\r\n"}},
+		{"crlf line after login", "\r\nlook\r\n", []string{script, "look\r\n"}},
+		{"only the line ending", "\n", []string{script}},
+		{"blank line after login", "\n\nlook\n", []string{script, "\r\n", "look\r\n"}},
+		{"no line ending", "", []string{script}},
+		{"input without a line ending first", "look\n", []string{script, "look\r\n"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			addr, lines := listenUpstream(t)
+			p := newTestPool(t, addr)
+			client, _ := serveClient(t, p, loginMsg("game", testIrisPassword)+tt.after)
+			wantLines(t, lines, tt.want...)
+
+			// the next thing the game receives is what the client sends next,
+			// so nothing extra was forwarded
+			go io.WriteString(client, "marker\n")
+			wantLines(t, lines, "marker\r\n")
+		})
+	}
+}
+
+func TestPartialLineSentWithLoginIsFinishedLater(t *testing.T) {
+	addr, lines := listenUpstream(t)
+	p := newTestPool(t, addr)
+	client, _ := serveClient(t, p, loginMsg("game", testIrisPassword)+"\nlook")
+	wantLines(t, lines, "connect me "+testUpstreamPassword+"\r\n")
+
+	go io.WriteString(client, "\nmarker\n")
+	wantLines(t, lines, "look\r\n", "marker\r\n")
+}
+
+func TestInputSentWithLoginJoiningConnectedUpstream(t *testing.T) {
+	addr, lines := listenUpstream(t)
+	p := newTestPool(t, addr)
+	serveClient(t, p, loginMsg("game", testIrisPassword)+"\n")
+	wantLines(t, lines, "connect me "+testUpstreamPassword+"\r\n")
+
+	second, _ := serveClient(t, p, loginMsg("game", testIrisPassword)+"\nlook\n")
+	wantLines(t, lines, "look\r\n")
+
+	go io.WriteString(second, "marker\n")
+	wantLines(t, lines, "marker\r\n")
+}
+
+func TestFailedLoginForwardsNothing(t *testing.T) {
+	addr, lines := listenUpstream(t)
+	p := newTestPool(t, addr)
+	first, _ := serveClient(t, p, loginMsg("game", testIrisPassword)+"\n")
+	wantLines(t, lines, "connect me "+testUpstreamPassword+"\r\n")
+
+	_, done := serveClient(t, p, loginMsg("game", "wrong")+"\nlook\n")
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("failed login never finished")
+	}
+
+	go io.WriteString(first, "marker\n")
+	wantLines(t, lines, "marker\r\n")
+}
