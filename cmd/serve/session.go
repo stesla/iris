@@ -133,7 +133,8 @@ func (p *SessionPool) upstreamFor(id int64, name string) *upstream {
 
 // syncUpstream updates the live upstream with the given id, if there is one, to
 // the name in its database row. Its log file follows the new name the next time
-// histories are reopened.
+// histories are reopened. If the row is gone it closes the upstream and returns
+// sql.ErrNoRows.
 //
 // Call it after committing a change to the row. Every commit is followed by a
 // sync and syncs run one at a time, so the last one sees the latest commit.
@@ -142,7 +143,11 @@ func (p *SessionPool) syncUpstream(ctx context.Context, id int64) error {
 	defer p.syncMu.Unlock()
 
 	var name string
-	if err := p.db.QueryRowContext(ctx, "SELECT name FROM upstreams WHERE id=?", id).Scan(&name); err != nil {
+	err := p.db.QueryRowContext(ctx, "SELECT name FROM upstreams WHERE id=?", id).Scan(&name)
+	if errors.Is(err, sql.ErrNoRows) {
+		p.closeUpstream(id)
+	}
+	if err != nil {
 		return err
 	}
 
@@ -407,6 +412,10 @@ func (s *downstream) connectUpstream() (err error) {
 		// client is only attached once that has succeeded, so a failure
 		// doesn't close it before it is told why.
 		<-done
+		// the row may have been deleted since it was loaded
+		if err := s.pool.syncUpstream(s.Context(), config.id); err != nil {
+			return err
+		}
 		if !u.IsConnected() {
 			return errUpstreamNotConnected
 		}
@@ -421,8 +430,9 @@ func (s *downstream) connectUpstream() (err error) {
 	connecting = u
 	s.upstream = u
 
-	// the row may have changed since it was loaded. A rename committed before
-	// this found no session to update, and one committed after finds this one.
+	// the row may have changed since it was loaded. A rename or delete committed
+	// before this found no session to update, and one committed after finds this
+	// one, so a deleted upstream is never dialed with the password loaded above.
 	if err := s.pool.syncUpstream(s.Context(), config.id); err != nil {
 		return err
 	}

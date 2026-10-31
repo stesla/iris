@@ -63,7 +63,7 @@ Phase 4: Session races
 - [x] 8. `read the session name from the database on rename`
 - [x] 9. `pick up renames that land during a login`
 - [x] 10. `refuse to attach clients to a closed upstream` (not in TODO)
-- [ ] 11. `don't connect an upstream deleted during login`
+- [x] 11. `don't connect an upstream deleted during login`
 - [ ] 12. `tell the client when its upstream is deleted while connecting`
 
 Phase 5: Client I/O
@@ -320,7 +320,10 @@ types.
 **Fix**
 - `syncUpstream` handles a missing row by calling `closeUpstream` and returning
   `sql.ErrNoRows`, so the client sees `upstream not found`.
-- The re-check runs after the pool insert and before dialing.
+- The re-check runs after the pool insert and before dialing. For a login that
+  joins, it runs once the first login is done, before attaching.
+- `editUpstream` doesn't log `sql.ErrNoRows` from the sync, because it only means
+  a delete landed first.
 - Why this closes the race: a delete committed before the re-check is seen by it.
   A delete committed after it reaches `closeUpstream`
   (`cmd/serve/rest.go:183`) and finds the upstream in the pool.

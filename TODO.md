@@ -22,7 +22,7 @@ request and a Telnet login.
   - Give `logFile` its own lock around `Write`, `Reopen` and `Close`.
   - Renames depend on this too, because a renamed upstream's log file only
     picks up the new name on reopen. See "Reopen the log on rename" below.
-- [ ] **A Telnet login can race with REST delete.**
+- [x] **A Telnet login can race with REST delete.**
   - Sequence: a login loads the upstream row (`loadUpstream`), then the
     upstream is deleted and `closeUpstream` runs, then the login calls
     `upstreamFor`.

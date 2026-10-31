@@ -1501,3 +1501,133 @@ func TestCloseDuringAddDownstream(t *testing.T) {
 		}
 	}
 }
+
+func TestSyncUpstreamMissingRowClosesSession(t *testing.T) {
+	p := newTestPool(t, "unused:1")
+	u := addConnected(t, p, "game")
+	if _, err := p.db.Exec("DELETE FROM upstreams WHERE id=?", u.id); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := p.syncUpstream(context.Background(), u.id); !errors.Is(err, sql.ErrNoRows) {
+		t.Errorf("got %v", err)
+	}
+	if u.IsConnected() {
+		t.Error("session is still connected")
+	}
+	if poolSize(p) != 0 {
+		t.Errorf("pool size = %d", poolSize(p))
+	}
+}
+
+// TestLoginJoiningDeletedUpstream deletes only the row, as a delete has done
+// just before it reaches closeUpstream.
+func TestLoginJoiningDeletedUpstream(t *testing.T) {
+	p := newTestPool(t, "unused:1")
+	u := addConnected(t, p, "game")
+	dials := countDials(t)
+	afterLoadUpstream(t, func() {
+		if _, err := p.db.Exec("DELETE FROM upstreams WHERE id=?", u.id); err != nil {
+			t.Error(err)
+		}
+	})
+
+	d, output, err := loginOutput(t, p, loginMsg("game", testIrisPassword))
+	if !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("got %v", err)
+	}
+	if got := output(); !strings.Contains(got, "login failed: upstream not found\r\n") {
+		t.Errorf("client received %q", got)
+	}
+	if d.upstream != nil {
+		t.Error("client has an upstream")
+	}
+	if n := len(u.clients()); n != 0 {
+		t.Errorf("clients = %d", n)
+	}
+	if u.IsConnected() {
+		t.Error("session is still connected")
+	}
+	if poolSize(p) != 0 {
+		t.Errorf("pool size = %d", poolSize(p))
+	}
+	if n := dials.Load(); n != 0 {
+		t.Errorf("dials = %d", n)
+	}
+}
+
+// TestLoginWaitingOnDeletedUpstream has a first login that never connected, so
+// the client is told the upstream is gone rather than that it failed to connect.
+func TestLoginWaitingOnDeletedUpstream(t *testing.T) {
+	p := newTestPool(t, "unused:1")
+	id := upstreamID(t, p.db, "game")
+	u := p.upstreamFor(id, "game")
+	u.beginConnect()
+	u.endConnect()
+	afterLoadUpstream(t, func() {
+		if _, err := p.db.Exec("DELETE FROM upstreams WHERE id=?", id); err != nil {
+			t.Error(err)
+		}
+	})
+
+	if _, err := login(t, p, loginMsg("game", testIrisPassword)); !errors.Is(err, sql.ErrNoRows) {
+		t.Errorf("got %v", err)
+	}
+	if poolSize(p) != 0 {
+		t.Errorf("pool size = %d", poolSize(p))
+	}
+}
+
+// TestRenameRacingDeleteIsNotAnError deletes the upstream between a rename's
+// commit and its sync, which is a normal outcome rather than something to log.
+func TestRenameRacingDeleteIsNotAnError(t *testing.T) {
+	p := newTestPool(t, "unused:1")
+	srv := &apiServer{db: p.db, sessions: p, box: p.box}
+	u := addConnected(t, p, "game")
+	id := u.id
+
+	var logged bytes.Buffer
+	oldLogger := logger
+	logger = zerolog.New(&logged)
+	t.Cleanup(func() { logger = oldLogger })
+
+	p.syncMu.Lock()
+	newName := "renamed"
+	done := make(chan error, 1)
+	go func() {
+		done <- srv.editUpstream(context.Background(), "game", &api.EditUpstreamRequest{NewName: &newName})
+	}()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		var name string
+		if err := p.db.QueryRow("SELECT name FROM upstreams WHERE id=?", id).Scan(&name); err != nil {
+			p.syncMu.Unlock()
+			t.Fatal(err)
+		}
+		if name == newName {
+			break
+		}
+		if time.Now().After(deadline) {
+			p.syncMu.Unlock()
+			t.Fatal("rename never committed")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if err := srv.deleteUpstream(context.Background(), newName); err != nil {
+		p.syncMu.Unlock()
+		t.Fatal(err)
+	}
+	p.syncMu.Unlock()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Errorf("got %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("rename never finished")
+	}
+	if got := logged.String(); strings.Contains(got, "error syncing") {
+		t.Errorf("logged %q", got)
+	}
+}
