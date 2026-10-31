@@ -81,7 +81,7 @@ request and a Telnet login.
       never answers Telnet option negotiation joins a live session and gets
       no history. Not yet checked against real MU clients. History replay
       also has no automated test, for the same reason.
-- [ ] **`upstream was closed while connecting` rarely reaches the client.**
+- [x] **`upstream was closed while connecting` rarely reaches the client.**
       When an upstream is deleted during a login, `closeUpstream` closes
       every attached client, including the one still logging in, before
       `writeLoginError` can tell it why. The client just sees the connection

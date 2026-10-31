@@ -352,6 +352,14 @@ func (s *downstream) connectNewUpstream(config *upstreamConfig, options map[stri
 		return fmt.Errorf("error connecting (%v): %w", address, err)
 	}
 
+	// attached only now, so closing the upstream while it connects can't close
+	// the client before it is told why, and before the read loop starts, so the
+	// client can't miss the game's first output
+	if err := s.upstream.AddDownstream(s); err != nil {
+		return err
+	}
+	s.upstream.start()
+
 	// an empty script means the default, as NULL does
 	connectScript := config.script.String
 	if connectScript == "" {
@@ -372,7 +380,7 @@ func (s *downstream) connectUpstream() (err error) {
 	var connecting *upstream // set if this login is the one connecting
 
 	// deferred functions run last first, so the client is told why its
-	// login failed before removing the upstream closes the client, and
+	// login failed before removing the upstream can close the client, and
 	// logins waiting on this one are only woken once that is done
 	defer func() {
 		if connecting != nil {
@@ -437,9 +445,6 @@ func (s *downstream) connectUpstream() (err error) {
 		return err
 	}
 
-	if err := u.AddDownstream(s); err != nil {
-		return err
-	}
 	return s.connectNewUpstream(config, login.Options)
 }
 
@@ -574,7 +579,8 @@ func (s *upstream) endConnect() {
 
 // Connect connects to the game at addr. It fails with errUpstreamClosed if
 // the upstream is closed first, such as by being deleted while connecting,
-// which also cancels the dial.
+// which also cancels the dial. Call start once it succeeds, after attaching the
+// first client.
 func (s *upstream) Connect(addr string) error {
 	s.state.Lock()
 	if s.closed {
@@ -628,8 +634,13 @@ func (s *upstream) Connect(addr string) error {
 		Name: EventConnectUpstream,
 		Data: s,
 	})
-	go s.runForever()
 	return nil
+}
+
+// start begins reading from the game. Anything the game has already sent waits
+// for this, so a client attached first receives it.
+func (s *upstream) start() {
+	go s.runForever()
 }
 
 // AddDownstream attaches w, or returns errUpstreamClosed if the upstream is

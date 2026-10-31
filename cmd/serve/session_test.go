@@ -23,6 +23,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/stesla/iris/api"
+	"github.com/stesla/iris/internal/event"
 	"github.com/stesla/iris/internal/secret"
 	"github.com/stesla/iris/internal/telnet"
 )
@@ -1629,5 +1630,130 @@ func TestRenameRacingDeleteIsNotAnError(t *testing.T) {
 	}
 	if got := logged.String(); strings.Contains(got, "error syncing") {
 		t.Errorf("logged %q", got)
+	}
+}
+
+func TestDeleteWhileDialingTellsClient(t *testing.T) {
+	p := newTestPool(t, "unused:1")
+	srv := &apiServer{db: p.db, sessions: p, box: p.box}
+	started := make(chan struct{})
+	real := dial
+	dial = func(ctx context.Context, network, addr string) (net.Conn, error) {
+		close(started)
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+	t.Cleanup(func() { dial = real })
+
+	client, server := net.Pipe()
+	t.Cleanup(func() { client.Close(); server.Close() })
+	go io.WriteString(client, loginMsg("game", testIrisPassword))
+	var out bytes.Buffer
+	disconnected := make(chan struct{})
+	go func() {
+		io.Copy(&out, client)
+		close(disconnected)
+	}()
+	// the same steps as the goroutine serving a client in runTelnetProxy
+	go func() {
+		d := p.NewDownstream(server)
+		defer d.Close()
+		d.runForever()
+	}()
+
+	<-started
+	if err := srv.deleteUpstream(context.Background(), "game"); err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case <-disconnected:
+	case <-time.After(5 * time.Second):
+		t.Fatal("client was never disconnected")
+	}
+	if got := out.String(); !strings.Contains(got, "login failed: "+errUpstreamClosed.Error()+"\r\n") {
+		t.Errorf("client received %q", got)
+	}
+}
+
+// TestCloseAfterConnectBeforeAttach closes the upstream once it has connected
+// but before the client is attached, so the client is refused and told why.
+func TestCloseAfterConnectBeforeAttach(t *testing.T) {
+	addr, lines := listenUpstream(t)
+	p := newTestPool(t, addr)
+	u := p.upstreamFor(upstreamID(t, p.db, "game"), "game")
+	u.dispatcher.ListenFunc(EventConnectUpstream, func(context.Context, event.Event) error {
+		u.Close()
+		return nil
+	})
+
+	_, output, err := loginOutput(t, p, loginMsg("game", testIrisPassword))
+	if !errors.Is(err, errUpstreamClosed) {
+		t.Fatalf("got %v", err)
+	}
+	if got := output(); !strings.Contains(got, "login failed: "+errUpstreamClosed.Error()+"\r\n") {
+		t.Errorf("client received %q", got)
+	}
+	if poolSize(p) != 0 {
+		t.Errorf("pool size = %d", poolSize(p))
+	}
+	timeout := time.After(5 * time.Second)
+	for {
+		select {
+		case line, ok := <-lines:
+			if !ok {
+				return
+			}
+			t.Errorf("game received %q", line)
+		case <-timeout:
+			t.Fatal("connection to the game was left open")
+		}
+	}
+}
+
+func TestFirstClientReceivesGameOutputSentOnAccept(t *testing.T) {
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { l.Close() })
+	go func() {
+		conn, err := l.Accept()
+		if err != nil {
+			return
+		}
+		t.Cleanup(func() { conn.Close() })
+		io.WriteString(conn, "welcome to the game\r\n")
+	}()
+	p := newTestPool(t, l.Addr().String())
+
+	client, server := net.Pipe()
+	t.Cleanup(func() { client.Close(); server.Close() })
+	go io.WriteString(client, loginMsg("game", testIrisPassword))
+	received := make(chan struct{})
+	go func() {
+		var out []byte
+		buf := make([]byte, readBufSize)
+		for {
+			n, err := client.Read(buf)
+			if err != nil {
+				return
+			}
+			out = append(out, buf[:n]...)
+			if bytes.Contains(out, []byte("welcome to the game")) {
+				close(received)
+				io.Copy(io.Discard, client)
+				return
+			}
+		}
+	}()
+	if err := p.NewDownstream(server).connectUpstream(); err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case <-received:
+	case <-time.After(5 * time.Second):
+		t.Fatal("client never received the game's first output")
 	}
 }

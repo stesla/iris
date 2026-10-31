@@ -64,7 +64,7 @@ Phase 4: Session races
 - [x] 9. `pick up renames that land during a login`
 - [x] 10. `refuse to attach clients to a closed upstream` (not in TODO)
 - [x] 11. `don't connect an upstream deleted during login`
-- [ ] 12. `tell the client when its upstream is deleted while connecting`
+- [x] 12. `tell the client when its upstream is deleted while connecting`
 
 Phase 5: Client I/O
 - [ ] 13. `forward input sent with the login`
