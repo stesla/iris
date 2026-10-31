@@ -4,8 +4,11 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -13,6 +16,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/text/encoding"
+	"golang.org/x/text/encoding/unicode"
 )
 
 type mockConn struct {
@@ -223,4 +227,85 @@ func TestLargeWrite(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, len(data), n)
 	require.Equal(t, data, output.Bytes())
+}
+
+// lockedBuffer collects writes, so a test sees races in the code it is testing
+// rather than in the buffer.
+type lockedBuffer struct {
+	sync.Mutex
+	bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.Lock()
+	defer b.Unlock()
+	return b.Buffer.Write(p)
+}
+
+func TestConcurrentWrites(t *testing.T) {
+	const writers, lines = 4, 50
+	var output lockedBuffer
+	telnet := Wrap(context.Background(), &mockConn{Writer: &output})
+
+	// longer than the encoder's buffer, so each line takes several writes to
+	// the connection
+	line := func(w, i int) string {
+		return fmt.Sprintf("%d-%d-%s", w, i, strings.Repeat("x", 10000))
+	}
+	var want []string
+	var wg sync.WaitGroup
+	for w := range writers {
+		for i := range lines {
+			want = append(want, line(w, i))
+		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range lines {
+				_, err := telnet.Write([]byte(line(w, i) + "\n"))
+				assert.NoError(t, err)
+			}
+		}()
+	}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for range lines {
+			telnet.SetWriteEncoding(unicode.UTF8)
+			telnet.SetWriteEncoding(ASCII)
+		}
+	}()
+	wg.Wait()
+
+	got := strings.Split(strings.TrimSuffix(output.String(), "\r\n"), "\r\n")
+	assert.ElementsMatch(t, want, got)
+}
+
+func TestCloseUnblocksStuckWrite(t *testing.T) {
+	client, server := net.Pipe()
+	defer client.Close()
+	telnet := Wrap(context.Background(), server)
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := telnet.Write([]byte("nobody is reading\n"))
+		done <- err
+	}()
+	// a second write waits on the first, which is stuck on the pipe
+	second := make(chan error, 1)
+	go func() {
+		_, err := telnet.Write([]byte("nor this\n"))
+		second <- err
+	}()
+	time.Sleep(10 * time.Millisecond)
+	require.NoError(t, telnet.Close())
+
+	for _, ch := range []chan error{done, second} {
+		select {
+		case err := <-ch:
+			assert.Error(t, err)
+		case <-time.After(5 * time.Second):
+			t.Fatal("Close didn't unblock a stuck write")
+		}
+	}
 }

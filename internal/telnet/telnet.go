@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"net"
+	"sync"
 
 	"github.com/stesla/iris/internal/event"
 	"golang.org/x/text/encoding"
@@ -32,7 +33,12 @@ type conn struct {
 	read            io.Reader
 	suppressGoAhead bool
 	writeNoEnc      *writer
-	write           io.Writer
+
+	// writeMu guards write, which holds encoder state, and keeps each Write
+	// together on the connection. Close doesn't take it, so closing still
+	// unblocks a stuck Write.
+	writeMu sync.Mutex
+	write   io.Writer
 }
 
 func Wrap(ctx context.Context, c net.Conn) Conn {
@@ -136,6 +142,8 @@ func (c *conn) SetReadEncoding(enc encoding.Encoding) {
 
 func (c *conn) SetWriteEncoding(enc encoding.Encoding) {
 	encoder := encoding.ReplaceUnsupported(enc.NewEncoder())
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
 	c.write = encoder.Writer(c.writeNoEnc)
 }
 
@@ -144,6 +152,8 @@ func (c *conn) SuppressGoAhead(value bool) {
 }
 
 func (c *conn) Write(p []byte) (n int, err error) {
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
 	return c.write.Write(p)
 }
 

@@ -1877,3 +1877,44 @@ func TestFailedLoginForwardsNothing(t *testing.T) {
 	go io.WriteString(first, "marker\n")
 	wantLines(t, lines, "marker\r\n")
 }
+
+func TestClientsTypingAtOnce(t *testing.T) {
+	const clients, lineCount = 2, 200
+	addr, lines := listenUpstream(t)
+	p := newTestPool(t, addr)
+	first, _ := serveClient(t, p, loginMsg("game", testIrisPassword)+"\n")
+	wantLines(t, lines, "connect me "+testUpstreamPassword+"\r\n")
+	second, _ := serveClient(t, p, loginMsg("game", testIrisPassword)+"\n")
+
+	want := make(map[string]bool)
+	for c, client := range []net.Conn{first, second} {
+		for i := range lineCount {
+			want[fmt.Sprintf("client %d line %d\r\n", c, i)] = true
+		}
+		go func() {
+			for i := range lineCount {
+				if _, err := fmt.Fprintf(client, "client %d line %d\n", c, i); err != nil {
+					t.Error(err)
+					return
+				}
+			}
+		}()
+	}
+
+	timeout := time.After(10 * time.Second)
+	for range clients * lineCount {
+		select {
+		case line, ok := <-lines:
+			if !ok {
+				t.Fatalf("connection closed with %d lines left", len(want))
+			}
+			got := stripNegotiation(line)
+			if !want[got] {
+				t.Fatalf("game received %q", got)
+			}
+			delete(want, got)
+		case <-timeout:
+			t.Fatalf("game never received %d lines", len(want))
+		}
+	}
+}

@@ -68,7 +68,7 @@ Phase 4: Session races
 
 Phase 5: Client I/O
 - [x] 13. `forward input sent with the login`
-- [ ] 14. `serialize telnet connection writes` (not in TODO)
+- [x] 14. `serialize telnet connection writes` (not in TODO)
 - [ ] 15. `buffer history replay until negotiation completes`
 
 ## Constraints to respect
