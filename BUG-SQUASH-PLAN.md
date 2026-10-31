@@ -61,7 +61,7 @@ Phase 3: Log file
 
 Phase 4: Session races
 - [x] 8. `read the session name from the database on rename`
-- [ ] 9. `pick up renames that land during a login`
+- [x] 9. `pick up renames that land during a login`
 - [ ] 10. `refuse to attach clients to a closed upstream` (not in TODO)
 - [ ] 11. `don't connect an upstream deleted during login`
 - [ ] 12. `tell the client when its upstream is deleted while connecting`
@@ -276,7 +276,14 @@ cleared, because `api/types.go:75-84` rejects the other fields when empty.
 ### 9. `pick up renames that land during a login`
 
 **Fix**
-- Call `syncUpstream` right after `upstreamFor` at `cmd/serve/session.go:386`.
+- Call `syncUpstream` in the login that won `beginConnect`, before it attaches or
+  dials. Not right after `upstreamFor`, as first planned: a failure there can't
+  clean up, because `removeUnconnected` would close an upstream that another login
+  is still connecting. The winner already owns that cleanup, and a login that
+  joins doesn't need the sync, because the upstream is in the pool by then.
+- This also closes the delete race for the login that connects: a missing row
+  fails the sync, so the client sees `upstream not found` and nothing is dialed.
+  Commit 11 still has to handle `closeUpstream` and a client that joins.
 - Make `loadUpstream` (`:291`) a package variable, like `dial` at `:40`. Tests
   can then rename at exactly the racy moment.
 
@@ -284,6 +291,9 @@ cleared, because `api/types.go:75-84` rejects the other fields when empty.
 - Wrap `loadUpstream` to run `editUpstream` after the real load.
 - After login, `GET /sessions` shows the new name, `<date>-renamed.log` exists,
   and `<date>-game.log` doesn't.
+- A rename during the dial reaches the session through its own sync.
+- Wrap `loadUpstream` to delete after the real load: no dials, an empty pool, and
+  `upstream not found`.
 
 ### 10. `refuse to attach clients to a closed upstream`
 

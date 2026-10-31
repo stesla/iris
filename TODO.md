@@ -30,7 +30,7 @@ request and a Telnet login.
     connects to the game, using the password it already loaded.
   - Re-check that the row still exists once the upstream is in the pool, or
     after `Connect`, and close it if not.
-- [ ] **A Telnet login can race with REST rename.**
+- [x] **A Telnet login can race with REST rename.**
   - Sequence: a login loads the upstream under its old name, then the rename
     commits and `renameUpstream` runs, then the login calls `upstreamFor`.
   - Result: if nothing was connected yet, `renameUpstream` finds no session,

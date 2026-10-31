@@ -22,6 +22,7 @@ import (
 	"github.com/spf13/viper"
 	"golang.org/x/crypto/bcrypt"
 
+	"github.com/stesla/iris/api"
 	"github.com/stesla/iris/internal/secret"
 	"github.com/stesla/iris/internal/telnet"
 )
@@ -1329,5 +1330,96 @@ func TestSyncUpstreamQueryFailureKeepsName(t *testing.T) {
 	}
 	if name, _, _ := u.info(); name != "game" {
 		t.Errorf("name = %q", name)
+	}
+}
+
+// afterLoadUpstream runs f each time a login has read its upstream's row, the
+// moment at which a REST request can race with the login.
+func afterLoadUpstream(t *testing.T, f func()) {
+	t.Helper()
+	real := loadUpstream
+	loadUpstream = func(ctx context.Context, db *sql.DB, name string) (*upstreamConfig, error) {
+		config, err := real(ctx, db, name)
+		f()
+		return config, err
+	}
+	t.Cleanup(func() { loadUpstream = real })
+}
+
+func TestLoginRenamedAfterLoadUsesNewName(t *testing.T) {
+	addr, lines := listenUpstream(t)
+	p := newTestPool(t, addr)
+	dir := useLogDir(t)
+	srv := &apiServer{db: p.db, sessions: p, box: p.box}
+	newName := "renamed"
+	afterLoadUpstream(t, func() {
+		if err := srv.editUpstream(context.Background(), "game", &api.EditUpstreamRequest{NewName: &newName}); err != nil {
+			t.Error(err)
+		}
+	})
+
+	if _, err := login(t, p, loginMsg("game", testIrisPassword)); err != nil {
+		t.Fatal(err)
+	}
+	waitForLine(t, lines, "connect me "+testUpstreamPassword)
+
+	sessions := srv.listSessions()
+	if len(sessions) != 1 || sessions[0].UpstreamName != "renamed" {
+		t.Errorf("sessions = %+v", sessions)
+	}
+	if paths, _ := filepath.Glob(filepath.Join(dir, "*-renamed.log")); len(paths) == 0 {
+		t.Error("no log under the new name")
+	}
+	if paths, _ := filepath.Glob(filepath.Join(dir, "*-game.log")); len(paths) != 0 {
+		t.Errorf("log under the old name: %v", paths)
+	}
+}
+
+func TestLoginRenamedWhileDialingUpdatesSession(t *testing.T) {
+	addr, _ := listenUpstream(t)
+	p := newTestPool(t, addr)
+	srv := &apiServer{db: p.db, sessions: p, box: p.box}
+	newName := "renamed"
+	real := dial
+	dial = func(ctx context.Context, network, addr string) (net.Conn, error) {
+		if err := srv.editUpstream(context.Background(), "game", &api.EditUpstreamRequest{NewName: &newName}); err != nil {
+			t.Error(err)
+		}
+		return real(ctx, network, addr)
+	}
+	t.Cleanup(func() { dial = real })
+
+	if _, err := login(t, p, loginMsg("game", testIrisPassword)); err != nil {
+		t.Fatal(err)
+	}
+	sessions := srv.listSessions()
+	if len(sessions) != 1 || sessions[0].UpstreamName != "renamed" {
+		t.Errorf("sessions = %+v", sessions)
+	}
+}
+
+func TestLoginDeletedAfterLoadDoesNotConnect(t *testing.T) {
+	addr, _ := listenUpstream(t)
+	p := newTestPool(t, addr)
+	srv := &apiServer{db: p.db, sessions: p, box: p.box}
+	dials := countDials(t)
+	afterLoadUpstream(t, func() {
+		if err := srv.deleteUpstream(context.Background(), "game"); err != nil {
+			t.Error(err)
+		}
+	})
+
+	_, output, err := loginOutput(t, p, loginMsg("game", testIrisPassword))
+	if !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("got %v", err)
+	}
+	if got := output(); !strings.Contains(got, "login failed: upstream not found\r\n") {
+		t.Errorf("client received %q", got)
+	}
+	if n := dials.Load(); n != 0 {
+		t.Errorf("dials = %d", n)
+	}
+	if poolSize(p) != 0 {
+		t.Errorf("pool size = %d", poolSize(p))
 	}
 }

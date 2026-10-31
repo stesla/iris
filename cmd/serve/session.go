@@ -304,8 +304,9 @@ type upstreamConfig struct {
 	script   sql.NullString
 }
 
-// loadUpstream returns sql.ErrNoRows if the upstream doesn't exist.
-func loadUpstream(ctx context.Context, db *sql.DB, name string) (*upstreamConfig, error) {
+// loadUpstream returns sql.ErrNoRows if the upstream doesn't exist. It is a
+// variable so tests can change the database right after a login reads it.
+var loadUpstream = func(ctx context.Context, db *sql.DB, name string) (*upstreamConfig, error) {
 	var config upstreamConfig
 	row := db.QueryRowContext(ctx, "SELECT id, address, login, password, script FROM upstreams WHERE name=?", name)
 	if err := row.Scan(&config.id, &config.address, &config.login, &config.password, &config.script); err != nil {
@@ -417,6 +418,13 @@ func (s *downstream) connectUpstream() (err error) {
 
 	connecting = u
 	s.upstream = u
+
+	// the row may have changed since it was loaded. A rename committed before
+	// this found no session to update, and one committed after finds this one.
+	if err := s.pool.syncUpstream(s.Context(), config.id); err != nil {
+		return err
+	}
+
 	u.AddDownstream(s)
 	return s.connectNewUpstream(config, login.Options)
 }
