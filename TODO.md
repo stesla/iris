@@ -76,11 +76,17 @@ request and a Telnet login.
       buffers past the end of the JSON object. Anything the client sends
       right after its login, in the same packet, is lost instead of going to
       the game. Forward `decoder.Buffered()` to the upstream once attached.
-- [ ] **History is only replayed after charset negotiation resolves.**
+- [x] **History is only replayed after charset negotiation resolves.**
       `downstream.Listen` waits for `EventCharsetResolved`, so a client that
       never answers Telnet option negotiation joins a live session and gets
       no history. Not yet checked against real MU clients. History replay
       also has no automated test, for the same reason.
+  - Replay and game output now wait in a buffer until the encoding is settled,
+    or for at most 5 seconds (`negotiationTimeout`).
+  - Checked against real clients with `é` in the history. `tf` accepts charset
+    and gets UTF-8 at once. `telnet` refuses it and gets ASCII at once. `tt++`
+    with no configuration doesn't answer Iris's `WILL CHARSET`, so it waits the
+    full 5 seconds on each join and then gets ASCII.
 - [x] **`upstream was closed while connecting` rarely reaches the client.**
       When an upstream is deleted during a login, `closeUpstream` closes
       every attached client, including the one still logging in, before

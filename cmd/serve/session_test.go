@@ -726,6 +726,12 @@ func TestConcurrentLoginsConnectOnce(t *testing.T) {
 	}
 	waitForLine(t, lines, "connect me")
 
+	// nothing reads answers from these clients, so end the wait for them
+	for _, r := range rs {
+		r.d.endNegotiation()
+		waitForReplay(t, r.d)
+	}
+
 	// Iris only reads the game's second line once it has written the first
 	// to every client, so once the second is in the history log, both
 	// clients have the first
@@ -1916,5 +1922,300 @@ func TestClientsTypingAtOnce(t *testing.T) {
 		case <-timeout:
 			t.Fatalf("game never received %d lines", len(want))
 		}
+	}
+}
+
+// setNegotiationTimeout changes negotiationTimeout for the rest of the test.
+func setNegotiationTimeout(t *testing.T, d time.Duration) {
+	t.Helper()
+	old := negotiationTimeout
+	negotiationTimeout = d
+	t.Cleanup(func() { negotiationTimeout = old })
+}
+
+// replayClient is a client that keeps everything Iris writes to it.
+type replayClient struct {
+	net.Conn
+	mu  sync.Mutex
+	out bytes.Buffer
+}
+
+func (c *replayClient) output() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.out.String()
+}
+
+// waitFor waits until the client has received want.
+func (c *replayClient) waitFor(t *testing.T, want string) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for !strings.Contains(c.output(), want) {
+		if time.Now().After(deadline) {
+			t.Fatalf("client never received %q: %q", want, c.output())
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// wontReceive checks that the client doesn't receive text for a little while.
+func (c *replayClient) wontReceive(t *testing.T, text string) {
+	t.Helper()
+	time.Sleep(100 * time.Millisecond)
+	if got := c.output(); strings.Contains(got, text) {
+		t.Fatalf("client received %q early: %q", text, got)
+	}
+}
+
+// waitForReplay waits until d is no longer holding back output for a replay.
+func waitForReplay(t *testing.T, d *downstream) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		d.replayMu.Lock()
+		pending := d.replayPending
+		d.replayMu.Unlock()
+		if !pending {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("replay never finished")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// joinClient serves a client as runTelnetProxy does, sending input before anything
+// else, and keeps what Iris writes back.
+func joinClient(t *testing.T, p *SessionPool, input string) *replayClient {
+	t.Helper()
+	client, server := net.Pipe()
+	t.Cleanup(func() { client.Close(); server.Close() })
+	c := &replayClient{Conn: client}
+	go func() {
+		buf := make([]byte, readBufSize)
+		for {
+			n, err := client.Read(buf)
+			if err != nil {
+				return
+			}
+			c.mu.Lock()
+			c.out.Write(buf[:n])
+			c.mu.Unlock()
+		}
+	}()
+	go io.WriteString(client, input)
+	go func() {
+		d := p.NewDownstream(server)
+		defer d.Close()
+		d.runForever()
+	}()
+	return c
+}
+
+// startReplay connects a first client, with text in the upstream's history.
+func startReplay(t *testing.T, text string) (*SessionPool, *upstream, func(string)) {
+	t.Helper()
+	addr, lines, send := listenGame(t)
+	p := newTestPool(t, addr)
+	serveClient(t, p, loginMsg("game", testIrisPassword)+"\n")
+	wantLines(t, lines, "connect me "+testUpstreamPassword+"\r\n")
+	p.RLock()
+	u := p.streams[upstreamID(t, p.db, "game")]
+	p.RUnlock()
+	if _, err := u.history.Write([]byte(text)); err != nil {
+		t.Fatal(err)
+	}
+	return p, u, send
+}
+
+// Telnet answers a client can send.
+var (
+	acceptCharset = string([]byte{telnet.IAC, telnet.DO, telnet.Charset, telnet.IAC, telnet.SB, telnet.Charset, telnet.CharsetAccepted}) +
+		"UTF-8" + string([]byte{telnet.IAC, telnet.SE})
+	refuseCharset = string([]byte{telnet.IAC, telnet.DONT, telnet.Charset, telnet.IAC, telnet.WONT, telnet.Charset})
+	acceptBinary  = string([]byte{telnet.IAC, telnet.DO, telnet.TransmitBinary, telnet.IAC, telnet.WILL, telnet.TransmitBinary})
+	refuseBinary  = string([]byte{telnet.IAC, telnet.DONT, telnet.TransmitBinary, telnet.IAC, telnet.WONT, telnet.TransmitBinary})
+)
+
+const (
+	replayUTF8  = "caf\xc3\xa9\r\n"
+	replayASCII = "caf\x1a\r\n"
+)
+
+func TestReplayWaitsForTransmitBinary(t *testing.T) {
+	setNegotiationTimeout(t, 30*time.Second)
+	p, _, _ := startReplay(t, "caf\xc3\xa9\n")
+	c := joinClient(t, p, loginMsg("game", testIrisPassword)+"\n")
+	io.WriteString(c, acceptCharset)
+	c.wontReceive(t, "caf")
+
+	io.WriteString(c, acceptBinary)
+	c.waitFor(t, replayUTF8)
+}
+
+func TestReplayAfterTransmitBinaryRefused(t *testing.T) {
+	setNegotiationTimeout(t, 30*time.Second)
+	p, _, _ := startReplay(t, "caf\xc3\xa9\n")
+	c := joinClient(t, p, loginMsg("game", testIrisPassword)+"\n")
+	io.WriteString(c, acceptCharset)
+	c.wontReceive(t, "caf")
+
+	io.WriteString(c, refuseBinary)
+	c.waitFor(t, replayASCII)
+}
+
+func TestReplayAfterCharsetRefused(t *testing.T) {
+	setNegotiationTimeout(t, 30*time.Second)
+	p, _, _ := startReplay(t, "caf\xc3\xa9\n")
+	c := joinClient(t, p, loginMsg("game", testIrisPassword)+"\n")
+	c.wontReceive(t, "caf")
+
+	io.WriteString(c, refuseCharset)
+	c.waitFor(t, replayASCII)
+}
+
+func TestReplayAfterUnknownCharsetAccepted(t *testing.T) {
+	setNegotiationTimeout(t, 30*time.Second)
+	p, _, _ := startReplay(t, "caf\xc3\xa9\n")
+	c := joinClient(t, p, loginMsg("game", testIrisPassword)+"\n")
+	c.wontReceive(t, "caf")
+
+	io.WriteString(c, string([]byte{telnet.IAC, telnet.DO, telnet.Charset, telnet.IAC, telnet.SB, telnet.Charset, telnet.CharsetAccepted})+
+		"BOGUS"+string([]byte{telnet.IAC, telnet.SE}))
+	c.waitFor(t, replayASCII)
+}
+
+func TestReplayWhenAnsweredBeforeLogin(t *testing.T) {
+	setNegotiationTimeout(t, 30*time.Second)
+	tests := []struct {
+		name, answers, want string
+	}{
+		{"charset refused", refuseCharset, replayASCII},
+		{"charset and binary accepted", acceptBinary + acceptCharset, replayUTF8},
+		{"charset accepted then binary", acceptCharset + acceptBinary, replayUTF8},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p, _, _ := startReplay(t, "caf\xc3\xa9\n")
+			c := joinClient(t, p, tt.answers+loginMsg("game", testIrisPassword)+"\n")
+			c.waitFor(t, tt.want)
+		})
+	}
+}
+
+func TestReplayWhenClientNeverAnswers(t *testing.T) {
+	setNegotiationTimeout(t, 200*time.Millisecond)
+	p, _, _ := startReplay(t, "caf\xc3\xa9\n")
+	c := joinClient(t, p, loginMsg("game", testIrisPassword)+"\n")
+	c.waitFor(t, replayASCII)
+}
+
+func TestGameOutputDuringReplayWaitFollowsHistory(t *testing.T) {
+	setNegotiationTimeout(t, 30*time.Second)
+	p, u, send := startReplay(t, "from history\n")
+	c := joinClient(t, p, loginMsg("game", testIrisPassword)+"\n")
+	deadline := time.Now().Add(5 * time.Second)
+	for len(u.clients()) < 3 { // the log, the first client and this one
+		if time.Now().After(deadline) {
+			t.Fatal("client never attached")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	send("live one\r\n")
+	send("live two\r\n")
+	waitForHistory(t, "game", "live two")
+	c.wontReceive(t, "live")
+
+	io.WriteString(c, refuseCharset)
+	c.waitFor(t, "live two\r\n")
+	got := c.output()
+	h, one, two := strings.Index(got, "from history"), strings.Index(got, "live one"), strings.Index(got, "live two")
+	if h < 0 || !(h < one && one < two) {
+		t.Errorf("client received %q", got)
+	}
+
+	send("after the wait\r\n")
+	c.waitFor(t, "after the wait\r\n")
+}
+
+func TestClientDisconnectsDuringReplayWait(t *testing.T) {
+	setNegotiationTimeout(t, 100*time.Millisecond)
+	p, u, send := startReplay(t, "from history\n")
+	c := joinClient(t, p, loginMsg("game", testIrisPassword)+"\n")
+	deadline := time.Now().Add(5 * time.Second)
+	for len(u.clients()) < 3 { // the log, the first client and this one
+		if time.Now().After(deadline) {
+			t.Fatal("client never attached")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	c.Close()
+
+	// once the wait is over, writing to the client fails and it is dropped
+	time.Sleep(300 * time.Millisecond)
+	send("still running\r\n")
+	waitForHistory(t, "game", "still running")
+	deadline = time.Now().Add(5 * time.Second)
+	for len(u.clients()) != 2 {
+		if time.Now().After(deadline) {
+			t.Fatalf("clients = %d", len(u.clients()))
+		}
+		send("still running\r\n")
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func TestFirstLoginOutputIsNotHeldBack(t *testing.T) {
+	setNegotiationTimeout(t, 30*time.Second)
+	addr, _, send := listenGame(t)
+	p := newTestPool(t, addr)
+	c := joinClient(t, p, loginMsg("game", testIrisPassword)+"\n")
+	send("welcome\r\n")
+	c.waitFor(t, "welcome\r\n")
+}
+
+func TestLogReplayOfNewLogHasNoSeparator(t *testing.T) {
+	useLogDir(t)
+	h, err := newHistory("game")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer h.Close()
+	if _, err := h.Write([]byte("only session\n")); err != nil {
+		t.Fatal(err)
+	}
+	var got bytes.Buffer
+	if _, err := h.WriteTo(&got); err != nil {
+		t.Fatal(err)
+	}
+	if got.String() != "only session\n" {
+		t.Errorf("replayed %q", got.String())
+	}
+}
+
+func TestLogReplayOfReusedLogIsLastSessionOnly(t *testing.T) {
+	useLogDir(t)
+	h, err := newHistory("game")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer h.Close()
+	if _, err := h.Write([]byte("first session\n")); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.Reopen("game"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.Write([]byte("second session\n")); err != nil {
+		t.Fatal(err)
+	}
+	var got bytes.Buffer
+	if _, err := h.WriteTo(&got); err != nil {
+		t.Fatal(err)
+	}
+	if got.String() != "second session\n" {
+		t.Errorf("replayed %q", got.String())
 	}
 }

@@ -47,6 +47,10 @@ var dialTimeout = 30 * time.Second
 // failed, in case the client isn't reading.
 const loginErrorTimeout = 5 * time.Second
 
+// negotiationTimeout is how long a joining client's replay waits for Telnet
+// negotiation to finish. It is a variable so tests can shorten it.
+var negotiationTimeout = 5 * time.Second
+
 var (
 	errLoginTooLong           = errors.New("login too long")
 	errUpstreamPasswordNotSet = errors.New("upstream password not set")
@@ -200,16 +204,22 @@ type telnetSession struct {
 	logger         zerolog.Logger
 	charset        telnet.CharsetHandler
 	transmitBinary telnet.TransmitBinaryHandler
-	dispatcher     event.Dispatcher
 	startedAt      time.Time
+
+	charsetAccepted bool // only used on the goroutine reading from conn
+
+	// negotiated is closed once the encoding is settled: charset was refused, or
+	// it was accepted and Transmit Binary has resolved in both directions.
+	negotiated     chan struct{}
+	negotiatedOnce sync.Once
 }
 
 func newSession(conn net.Conn, logger zerolog.Logger) *telnetSession {
 	s := &telnetSession{
 		conn:       telnet.Wrap(context.Background(), conn),
 		logger:     logger,
-		dispatcher: event.NewDispatcher(),
 		startedAt:  time.Now(),
+		negotiated: make(chan struct{}),
 	}
 	s.conn.RegisterHandler(LogHandler{Logger: s.logger})
 	s.conn.RegisterHandler(&s.transmitBinary)
@@ -250,17 +260,29 @@ func (s *telnetSession) Listen(_ context.Context, ev event.Event) error {
 				if opt.EnabledForUs() {
 					s.charset.RequestEncoding(unicode.UTF8)
 				} else {
-					s.dispatcher.Dispatch(context.Background(), event.Event{Name: EventCharsetResolved})
+					s.endNegotiation()
 				}
+			}
+		case telnet.TransmitBinary:
+			// the handlers registered first, so the encoding is already set
+			if s.charsetAccepted && !opt.Waiting() {
+				s.endNegotiation()
 			}
 		}
 	case telnet.EventCharsetAccepted:
-		s.GetOption(telnet.TransmitBinary).Allow(true, true).EnableBoth(s.Context())
-		fallthrough
+		s.charsetAccepted = true
+		// if it is already enabled there won't be an option event to wait for
+		if !s.GetOption(telnet.TransmitBinary).Allow(true, true).EnableBoth(s.Context()).Waiting() {
+			s.endNegotiation()
+		}
 	case telnet.EventCharsetRejected:
-		s.dispatcher.Dispatch(context.Background(), event.Event{Name: EventCharsetResolved})
+		s.endNegotiation()
 	}
 	return nil
+}
+
+func (s *telnetSession) endNegotiation() {
+	s.negotiatedOnce.Do(func() { close(s.negotiated) })
 }
 
 func (s *telnetSession) negotiateOptions() {
@@ -279,6 +301,70 @@ type downstream struct {
 	*telnetSession
 	upstream   *upstream
 	afterLogin []byte // input read along with the login, to forward once connected
+
+	// replayMu guards the fields below. While pending, Write adds to the buffer
+	// instead of writing to the client. Close doesn't take it, so closing still
+	// unblocks a flush stuck on the client.
+	replayMu      sync.Mutex
+	replayPending bool
+	replayBuf     bytes.Buffer
+}
+
+// Write writes to the client, or holds p back while a replay is pending.
+func (s *downstream) Write(p []byte) (int, error) {
+	s.replayMu.Lock()
+	defer s.replayMu.Unlock()
+	if s.replayPending {
+		return s.replayBuf.Write(p)
+	}
+	return s.telnetSession.Write(p)
+}
+
+// joinUpstream attaches the client to a connected upstream and replays its
+// history once the client's encoding is settled. Until then the history and any
+// game output wait in the buffer, because the Telnet default of 7-bit ASCII would
+// corrupt non-ASCII text.
+func (s *downstream) joinUpstream(u *upstream) error {
+	// held so that game output can't reach the client before the history
+	s.replayMu.Lock()
+	defer s.replayMu.Unlock()
+	if err := u.AddDownstream(s); err != nil {
+		return err
+	}
+	u.state.Lock()
+	history := u.history
+	u.state.Unlock()
+	if history == nil {
+		return nil
+	}
+	s.replayPending = true
+	if _, err := history.WriteTo(&s.replayBuf); err != nil {
+		s.logger.Error().AnErr("error", err).Msg("error reading history")
+	}
+	// this can't wait here, because the answers only arrive once the client's
+	// connection is being read again
+	go s.flushReplay(negotiationTimeout)
+	return nil
+}
+
+// flushReplay writes out the buffer once negotiation finishes. After timeout it
+// does so anyway: the client hasn't negotiated, so ASCII is what it expects, and
+// that's better than no history at all.
+func (s *downstream) flushReplay(timeout time.Duration) {
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case <-s.negotiated:
+	case <-timer.C:
+	}
+
+	s.replayMu.Lock()
+	defer s.replayMu.Unlock()
+	s.replayPending = false
+	if _, err := s.telnetSession.Write(s.replayBuf.Bytes()); err != nil {
+		s.logger.Error().AnErr("error", err).Msg("error writing history")
+	}
+	s.replayBuf = bytes.Buffer{}
 }
 
 // loginRequest is the JSON a client sends to log in. It is decoded into its
@@ -288,18 +374,6 @@ type loginRequest struct {
 	Name     string            `json:"name"`
 	Password string            `json:"password"`
 	Options  map[string]string `json:"options"`
-}
-
-func (s *downstream) Listen(_ context.Context, ev event.Event) error {
-	switch ev.Name {
-	case EventCharsetResolved:
-		go s.dispatcher.RemoveListener(EventCharsetResolved, s)
-		_, err := s.upstream.history.WriteTo(s)
-		if err != nil {
-			s.logger.Error().AnErr("error", err).Msg("error writing history")
-		}
-	}
-	return nil
 }
 
 type upstreamConfig struct {
@@ -429,11 +503,7 @@ func (s *downstream) connectUpstream() (err error) {
 			return errUpstreamNotConnected
 		}
 		s.upstream = u
-		if err := u.AddDownstream(s); err != nil {
-			return err
-		}
-		s.dispatcher.Listen(EventCharsetResolved, s)
-		return nil
+		return s.joinUpstream(u)
 	}
 
 	connecting = u
@@ -523,8 +593,6 @@ func (l *limitReader) Read(p []byte) (int, error) {
 	l.n -= int64(n)
 	return n, err
 }
-
-const EventCharsetResolved = "charset.resolved"
 
 func (s *downstream) runForever() {
 	s.logger.Debug().Msg("connected")
@@ -899,7 +967,7 @@ func (f *logFile) readHistory() ([]byte, error) {
 		return nil, err
 	}
 	buf = buf[:n]
-	if n = bytes.LastIndex(buf, []byte(logSepOpened)); n > 0 {
+	if n = bytes.LastIndex(buf, []byte(logSepOpened)); n >= 0 {
 		buf = buf[n:]
 		n = bytes.IndexByte(buf, '\n')
 		buf = buf[n+1:]
