@@ -157,8 +157,8 @@ func (p *SessionPool) syncUpstream(ctx context.Context, id int64) error {
 	return nil
 }
 
-// removeUnconnected removes u from the pool if it is still there and never
-// finished connecting, so a failed connection attempt doesn't leave it behind.
+// removeUnconnected removes u from the pool if it is still there and isn't
+// connected, so a failed connection attempt doesn't leave it behind.
 func (p *SessionPool) removeUnconnected(u *upstream) {
 	p.Lock()
 	defer p.Unlock()
@@ -411,7 +411,9 @@ func (s *downstream) connectUpstream() (err error) {
 			return errUpstreamNotConnected
 		}
 		s.upstream = u
-		u.AddDownstream(s)
+		if err := u.AddDownstream(s); err != nil {
+			return err
+		}
 		s.dispatcher.Listen(EventCharsetResolved, s)
 		return nil
 	}
@@ -425,7 +427,9 @@ func (s *downstream) connectUpstream() (err error) {
 		return err
 	}
 
-	u.AddDownstream(s)
+	if err := u.AddDownstream(s); err != nil {
+		return err
+	}
 	return s.connectNewUpstream(config, login.Options)
 }
 
@@ -522,7 +526,8 @@ type upstream struct {
 	mux        sync.Mutex
 	downstream []io.WriteCloser
 
-	// state guards the fields below, and setting telnetSession.
+	// state guards the fields below, and setting telnetSession. It can be taken
+	// while holding mux, but not the other way around.
 	state      sync.Mutex
 	name       string
 	closed     bool
@@ -605,7 +610,10 @@ func (s *upstream) Connect(addr string) error {
 		Logger())
 	s.state.Unlock()
 
-	s.AddDownstream(history)
+	if err := s.AddDownstream(history); err != nil {
+		history.Close()
+		return err
+	}
 	s.dispatcher.Dispatch(s.Context(), event.Event{
 		Name: EventConnectUpstream,
 		Data: s,
@@ -614,10 +622,20 @@ func (s *upstream) Connect(addr string) error {
 	return nil
 }
 
-func (s *upstream) AddDownstream(w io.WriteCloser) {
+// AddDownstream attaches w, or returns errUpstreamClosed if the upstream is
+// closed. Close sets closed before it reads the list, so w is either refused
+// here or closed there.
+func (s *upstream) AddDownstream(w io.WriteCloser) error {
 	s.mux.Lock()
 	defer s.mux.Unlock()
+	s.state.Lock()
+	closed := s.closed
+	s.state.Unlock()
+	if closed {
+		return errUpstreamClosed
+	}
 	s.downstream = append(s.downstream, w)
+	return nil
 }
 
 // clients returns a copy of the client list.
@@ -645,10 +663,11 @@ func (s *upstream) Close() error {
 	return nil
 }
 
+// IsConnected reports whether the upstream has connected and not been closed.
 func (s *upstream) IsConnected() bool {
 	s.state.Lock()
 	defer s.state.Unlock()
-	return s.telnetSession != nil
+	return s.telnetSession != nil && !s.closed
 }
 
 // info returns what GET /sessions reports about the upstream.

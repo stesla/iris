@@ -1423,3 +1423,81 @@ func TestLoginDeletedAfterLoadDoesNotConnect(t *testing.T) {
 		t.Errorf("pool size = %d", poolSize(p))
 	}
 }
+
+func TestAddDownstreamAfterCloseIsRefused(t *testing.T) {
+	u := &upstream{}
+	u.Close()
+
+	if err := u.AddDownstream(&closeRecorder{}); !errors.Is(err, errUpstreamClosed) {
+		t.Errorf("got %v", err)
+	}
+	if n := len(u.clients()); n != 0 {
+		t.Errorf("clients = %d", n)
+	}
+}
+
+func TestIsConnectedFalseAfterClose(t *testing.T) {
+	p := newTestPool(t, "unused:1")
+	u := addConnected(t, p, "game")
+	if !u.IsConnected() {
+		t.Fatal("not connected before closing")
+	}
+	u.Close()
+	if u.IsConnected() {
+		t.Error("connected after closing")
+	}
+}
+
+func TestLoginToClosedUpstreamIsNotAttached(t *testing.T) {
+	p := newTestPool(t, "unused:1")
+	u := addConnected(t, p, "game")
+	u.Close()
+
+	d, output, err := loginOutput(t, p, loginMsg("game", testIrisPassword))
+	if !errors.Is(err, errUpstreamNotConnected) {
+		t.Fatalf("got %v", err)
+	}
+	if d.upstream != nil {
+		t.Error("client has an upstream")
+	}
+	if n := len(u.clients()); n != 0 {
+		t.Errorf("clients = %d", n)
+	}
+	if got := output(); !strings.Contains(got, "login failed: "+errUpstreamNotConnected.Error()+"\r\n") {
+		t.Errorf("client received %q", got)
+	}
+}
+
+// TestCloseDuringAddDownstream checks that a client can't slip in as the
+// upstream closes: each one is either refused or closed.
+func TestCloseDuringAddDownstream(t *testing.T) {
+	for range 200 {
+		u := &upstream{}
+		clients := make([]*closeRecorder, 8)
+		accepted := make([]bool, len(clients))
+		var wg sync.WaitGroup
+		for i := range clients {
+			clients[i] = &closeRecorder{}
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				accepted[i] = u.AddDownstream(clients[i]) == nil
+			}()
+		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			u.Close()
+		}()
+		wg.Wait()
+
+		for i, c := range clients {
+			if accepted[i] && !c.closed {
+				t.Fatal("accepted a client and never closed it")
+			}
+			if !accepted[i] && c.closed {
+				t.Error("refused a client but closed it")
+			}
+		}
+	}
+}

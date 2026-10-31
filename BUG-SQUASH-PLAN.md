@@ -62,7 +62,7 @@ Phase 3: Log file
 Phase 4: Session races
 - [x] 8. `read the session name from the database on rename`
 - [x] 9. `pick up renames that land during a login`
-- [ ] 10. `refuse to attach clients to a closed upstream` (not in TODO)
+- [x] 10. `refuse to attach clients to a closed upstream` (not in TODO)
 - [ ] 11. `don't connect an upstream deleted during login`
 - [ ] 12. `tell the client when its upstream is deleted while connecting`
 
