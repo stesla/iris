@@ -49,7 +49,7 @@ request and a Telnet login.
     the log file use `y` until the next rename.
   - Having `renameUpstream` read the current name from the database, instead
     of taking it from the caller, would fix this and the race above.
-- [ ] **`GET /sessions` can list a closed upstream.** `upstream.info`
+- [x] **`GET /sessions` can list a closed upstream.** `upstream.info`
       (`cmd/serve/session.go`) reports an upstream as connected without checking
       `closed`, so it stays listed from when it closes until it leaves the pool.
       Found by reading the code, not reproduced. Having `info` check `closed`, as
@@ -181,6 +181,19 @@ request and a Telnet login.
 - [ ] **Test a failed history read during a join** (`joinUpstream` in
       `cmd/serve/session.go`). The error is logged and the client joins without
       history, but no test covers this.
+- [ ] **Changing the read encoding loses buffered input**
+      (`SetReadEncoding`, `internal/telnet/telnet.go:139`). The old decoder's
+      buffered bytes are discarded when it is replaced during a read.
+  - Reproduced by sending Telnet answers and a login in one write: padding the
+    login by 100 bytes worked, and by 600 or 3000 it timed out, having lost the
+    end of the login. Those are the only sizes run.
+  - It takes a long login in the same packet as the answers, and a real login is
+    far shorter, so it hasn't been fixed. A proper fix means reworking the read
+    path.
+- [ ] **A disconnected client stays in the upstream's list until the next game
+      output** (`sendDownstream`, `cmd/serve/session.go:814`). That is the only
+      place clients are removed, so an idle game keeps them. Found by reading the
+      code, not reproduced. It costs a little memory and nothing else.
 
 ## Security
 

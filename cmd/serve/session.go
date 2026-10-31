@@ -771,7 +771,7 @@ func (s *upstream) IsConnected() bool {
 func (s *upstream) info() (name string, startedAt time.Time, connected bool) {
 	s.state.Lock()
 	defer s.state.Unlock()
-	if s.telnetSession == nil {
+	if s.telnetSession == nil || s.closed {
 		return s.name, time.Time{}, false
 	}
 	return s.name, s.startedAt, true

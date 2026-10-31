@@ -581,6 +581,7 @@ func TestListSessions(t *testing.T) {
 	srv.sessions.streams[1] = &upstream{id: 1, name: "b", telnetSession: &telnetSession{startedAt: started}}
 	srv.sessions.streams[2] = &upstream{id: 2, name: "a", telnetSession: &telnetSession{startedAt: started.Add(time.Hour)}}
 	srv.sessions.streams[3] = &upstream{id: 3, name: "connecting"}
+	srv.sessions.streams[4] = &upstream{id: 4, name: "closed", telnetSession: &telnetSession{startedAt: started}, closed: true}
 
 	sessions, err := c.ListSessions(context.Background())
 	if err != nil {
